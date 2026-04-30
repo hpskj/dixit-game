@@ -80,6 +80,34 @@ function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
 function publicPlayer(p) { return { id: p.id, name: p.name, score: p.score, connected: p.connected }; }
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
+// منع تكرار الكروت طول اللعبة كاملة
+function resetDeck(room, sourceCards) {
+  const used = new Set(room.usedCardIds || []);
+  let available = shuffle(sourceCards || room.deckCards || readCards()).filter(card => !used.has(card.id));
+
+  // إذا خلصت كل الكروت، نبدأ دورة جديدة ونسمح بالتكرار من جديد
+  if (!available.length) {
+    room.usedCardIds = [];
+    available = shuffle(sourceCards || room.deckCards || readCards());
+  }
+
+  room.deck = available;
+}
+
+function drawCard(room) {
+  if (!room.deck || room.deck.length === 0) {
+    resetDeck(room, room.deckCards || readCards());
+  }
+
+  const card = room.deck.pop();
+  if (card) {
+    room.usedCardIds = room.usedCardIds || [];
+    room.usedCardIds.push(card.id);
+  }
+
+  return card;
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 12 * 1024 * 1024, files: 200 },
@@ -197,8 +225,8 @@ function newRoom(hostId, name) {
     players: [{ id: hostId, name, score: 0, connected: true }],
     phase: 'lobby', round: 0, targetScore: 30, storytellerIndex: -1,
     storytellerId: null, hint: '', hands: {}, storyCardId: null,
-    submissions: {}, votes: {}, tableCards: [], timerEndsAt: null, timerHandle: null,
-    settings: readSettings(), lastWinner: null
+    submissions: {}, votes: {}, skippedPlayers: {}, tableCards: [], timerEndsAt: null, timerHandle: null,
+    settings: readSettings(), lastWinner: null, deck: [], usedCardIds: []
   };
 }
 function clearTimer(room) { if (room.timerHandle) clearTimeout(room.timerHandle); room.timerHandle = null; room.timerEndsAt = null; }
@@ -217,7 +245,7 @@ function emitRoom(code) {
     tableCards: room.tableCards.map(c => {
       const owner = room.players.find(p => p.id === c.ownerId);
       const voters = Object.entries(room.votes || {})
-        .filter(([, tableId]) => tableId === c.tableId)
+        .filter(([pid, tableId]) => tableId === c.tableId && !room.skippedPlayers?.[pid])
         .map(([pid]) => room.players.find(p => p.id === pid)?.name)
         .filter(Boolean);
       return {
@@ -233,16 +261,23 @@ function emitRoom(code) {
 }
 function ensureEnoughCards(cards) { return (cards || []).length > 0; }
 function deal(room, sourceCards) {
-  const deck = shuffle(sourceCards || room.deckCards || readCards());
-  room.hands = {}; let i = 0;
-  room.players.forEach(p => { room.hands[p.id] = []; for (let n=0;n<6;n++) room.hands[p.id].push(deck[i++ % deck.length]); });
+  resetDeck(room, sourceCards);
+  room.hands = {};
+
+  room.players.forEach(p => {
+    room.hands[p.id] = [];
+    for (let n = 0; n < 6; n++) {
+      const card = drawCard(room);
+      if (card) room.hands[p.id].push(card);
+    }
+  });
 }
 function startRound(room) {
   clearTimer(room);
-  room.round += 1; room.phase = 'story'; room.hint = ''; room.storyCardId = null; room.submissions = {}; room.votes = {}; room.tableCards = []; room.lastWinner = null;
+  room.round += 1; room.phase = 'story'; room.hint = ''; room.storyCardId = null; room.submissions = {}; room.votes = {}; room.skippedPlayers = {}; room.tableCards = []; room.lastWinner = null;
   room.storytellerIndex = (room.storytellerIndex + 1) % room.players.length;
   room.storytellerId = room.players[room.storytellerIndex].id;
-  if (!Object.keys(room.hands).length) deal(room);
+  if (!Object.keys(room.hands).length) deal(room, room.deckCards);
   setPhaseTimer(room, room.settings.selectTimer, () => autoStory(room));
 }
 function removeFromHand(room, playerId, cardId) {
@@ -252,14 +287,25 @@ function removeFromHand(room, playerId, cardId) {
   return hand.splice(idx, 1)[0];
 }
 function refillHand(room, playerId) {
-  const cards = shuffle(room.deckCards || readCards());
-  while ((room.hands[playerId] || []).length < 6 && cards.length) room.hands[playerId].push(randomFrom(cards));
+  room.hands[playerId] = room.hands[playerId] || [];
+
+  while (room.hands[playerId].length < 6) {
+    const card = drawCard(room);
+    if (!card) break;
+    room.hands[playerId].push(card);
+  }
 }
 function prepareVoting(room) {
   clearTimer(room);
   const table = [];
-  for (const [pid, card] of Object.entries(room.submissions)) table.push({ ...card, ownerId: pid, tableId: makeId('t') });
-  room.tableCards = shuffle(table); room.phase = 'voting';
+
+  for (const [pid, card] of Object.entries(room.submissions)) {
+    if (!card) continue;
+    table.push({ ...card, ownerId: pid, tableId: makeId('t') });
+  }
+
+  room.tableCards = shuffle(table);
+  room.phase = 'voting';
   setPhaseTimer(room, room.settings.voteTimer, () => autoVote(room));
 }
 function autoStory(room) {
@@ -276,49 +322,106 @@ function autoStory(room) {
 }
 function autoSubmit(room) {
   if (!room || room.phase !== 'submit') return;
-  room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.submissions[p.id]).forEach(p => {
-    const hand = room.hands[p.id] || [];
-    if (hand.length) room.submissions[p.id] = removeFromHand(room, p.id, hand[0].id);
-  });
-  prepareVoting(room); emitRoom(room.code);
+
+  // من لا يختار كرت قبل انتهاء الوقت لا يحصل على نقاط في هذه الجولة
+  room.players
+    .filter(p => p.connected && p.id !== room.storytellerId && !room.submissions[p.id])
+    .forEach(p => {
+      room.skippedPlayers[p.id] = true;
+    });
+
+  prepareVoting(room);
+  emitRoom(room.code);
 }
 function autoVote(room) {
   if (!room || room.phase !== 'voting') return;
-  room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.votes[p.id]).forEach(p => {
-    const options = room.tableCards.filter(c => c.ownerId !== p.id);
-    if (options.length) room.votes[p.id] = randomFrom(options).tableId;
-  });
-  scoreRound(room); emitRoom(room.code);
+
+  // من لا يصوّت قبل انتهاء الوقت لا يحصل على نقاط في هذه الجولة
+  room.players
+    .filter(p => p.connected && p.id !== room.storytellerId && !room.votes[p.id])
+    .forEach(p => {
+      room.skippedPlayers[p.id] = true;
+    });
+
+  scoreRound(room);
+  emitRoom(room.code);
 }
 function scoreRound(room) {
   clearTimer(room);
+
   const votes = Object.entries(room.votes);
-  const correct = votes.filter(([, tableId]) => room.tableCards.find(c => c.tableId === tableId)?.ownerId === room.storytellerId).map(([pid]) => pid);
-  const allGuessers = room.players.filter(p => p.connected && p.id !== room.storytellerId);
+
+  const correct = votes
+    .filter(([pid]) => !room.skippedPlayers?.[pid])
+    .filter(([, tableId]) => room.tableCards.find(c => c.tableId === tableId)?.ownerId === room.storytellerId)
+    .map(([pid]) => pid);
+
+  const allGuessers = room.players.filter(p =>
+    p.connected &&
+    p.id !== room.storytellerId &&
+    !room.skippedPlayers?.[p.id]
+  );
+
   const storyteller = room.players.find(p => p.id === room.storytellerId);
+
   if (storyteller && correct.length > 0 && correct.length < allGuessers.length) {
     storyteller.score += 3;
-    correct.forEach(pid => { const p = room.players.find(x => x.id === pid); if (p) p.score += 3; });
+    correct.forEach(pid => {
+      const p = room.players.find(x => x.id === pid);
+      if (p) p.score += 3;
+    });
   }
-  for (const [, tableId] of votes) {
+
+  for (const [voterId, tableId] of votes) {
+    if (room.skippedPlayers?.[voterId]) continue;
+
     const card = room.tableCards.find(c => c.tableId === tableId);
     if (card && card.ownerId !== room.storytellerId) {
-      const owner = room.players.find(p => p.id === card.ownerId); if (owner) owner.score += 1;
+      const owner = room.players.find(p => p.id === card.ownerId);
+      if (owner && !room.skippedPlayers?.[owner.id]) owner.score += 1;
     }
   }
+
   room.players.forEach(p => refillHand(room, p.id));
+
   room.phase = 'results';
-  const winners = room.players.filter(p => p.score >= room.targetScore).sort((a,b) => b.score-a.score);
-  if (winners.length) { room.phase = 'ended'; room.lastWinner = { name: winners[0].name, score: winners[0].score }; io.to(room.code).emit('gameWinner', room.lastWinner); }
+  const winners = room.players.filter(p => p.score >= room.targetScore).sort((a, b) => b.score - a.score);
+
+  if (winners.length) {
+    room.phase = 'ended';
+    room.lastWinner = { name: winners[0].name, score: winners[0].score };
+    io.to(room.code).emit('gameWinner', room.lastWinner);
+  }
 }
 
 io.on('connection', socket => {
   socket.on('createRoom', (name='لاعب') => { const room = newRoom(socket.id, name); rooms[room.code] = room; socket.join(room.code); socket.emit('roomCreated', room.code); emitRoom(room.code); });
-  socket.on('joinRoom', ({ name='لاعب', code }) => { code = (code || '').toUpperCase(); const room = rooms[code]; if (!room) return socket.emit('errorMessage','الغرفة غير موجودة'); room.players.push({ id: socket.id, name, score: 0, connected: true }); socket.join(code); if (room.phase !== 'lobby') room.hands[socket.id] = shuffle(room.deckCards || readCards()).slice(0,6); emitRoom(code); });
+  socket.on('joinRoom', ({ name='لاعب', code }) => { code = (code || '').toUpperCase(); const room = rooms[code]; if (!room) return socket.emit('errorMessage','الغرفة غير موجودة'); room.players.push({ id: socket.id, name, score: 0, connected: true }); socket.join(code); if (room.phase !== 'lobby') {
+      room.hands[socket.id] = [];
+      for (let n = 0; n < 6; n++) {
+        const card = drawCard(room);
+        if (card) room.hands[socket.id].push(card);
+      }
+    }
+    emitRoom(code); });
   socket.on('startGame', async code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id) return; if (room.players.filter(p=>p.connected).length < 2) return socket.emit('errorMessage','تحتاج لاعبين على الأقل'); room.deckCards = await allCards(); if (!ensureEnoughCards(room.deckCards)) return socket.emit('errorMessage','أضف كروت أولاً من لوحة التحكم'); room.settings = readSettings(); deal(room, room.deckCards); startRound(room); emitRoom(room.code); });
   socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room)); emitRoom(room.code); });
-  socket.on('submitCard', ({ code, cardId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'submit' || room.submissions[socket.id]) return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.submissions[socket.id] = card; const needed = room.players.filter(p => p.connected).length; if (Object.keys(room.submissions).length >= needed) prepareVoting(room); emitRoom(room.code); });
-  socket.on('vote', ({ code, tableId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'voting') return; const card = room.tableCards.find(c => c.tableId === tableId); if (!card || card.ownerId === socket.id) return; room.votes[socket.id] = tableId; const needed = room.players.filter(p => p.connected && p.id !== room.storytellerId).length; if (Object.keys(room.votes).length >= needed) scoreRound(room); emitRoom(room.code); });
+  socket.on('submitCard', ({ code, cardId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'submit' || room.submissions[socket.id]) return;
+    if (room.skippedPlayers?.[socket.id]) return;
+    const card = removeFromHand(room, socket.id, cardId);
+    if (!card) return;
+    room.submissions[socket.id] = card;
+    const needed = room.players.filter(p => p.connected && !room.skippedPlayers?.[p.id]).length;
+    if (Object.keys(room.submissions).length >= needed) prepareVoting(room);
+    emitRoom(room.code); });
+  socket.on('vote', ({ code, tableId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'voting') return;
+    if (room.skippedPlayers?.[socket.id]) return;
+    const card = room.tableCards.find(c => c.tableId === tableId);
+    if (!card || card.ownerId === socket.id) return;
+    room.votes[socket.id] = tableId;
+    const needed = room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.skippedPlayers?.[p.id]).length;
+    if (Object.keys(room.votes).length >= needed) scoreRound(room);
+    emitRoom(room.code); });
   socket.on('nextRound', code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id || room.phase !== 'results') return; startRound(room); emitRoom(room.code); });
   socket.on('disconnect', () => { Object.values(rooms).forEach(room => { const p = room.players.find(x => x.id === socket.id); if (p) { p.connected = false; emitRoom(room.code); } }); });
 });
