@@ -666,24 +666,34 @@ function scoreRound(room) {
     gained[playerId] = (gained[playerId] || 0) + points;
   }
 
-  const correct = votes
-    .filter(([pid]) => !room.skippedPlayers?.[pid])
-    .filter(([, tableId]) => room.tableCards.find(c => c.tableId === tableId)?.ownerId === room.storytellerId)
-    .map(([pid]) => pid);
-
-  const allGuessers = room.players.filter(p =>
+  const activeGuessers = room.players.filter(p =>
     p.connected &&
     p.id !== room.storytellerId &&
     !room.skippedPlayers?.[p.id]
   );
 
-  const storyteller = room.players.find(p => p.id === room.storytellerId);
+  const correct = votes
+    .filter(([pid]) => !room.skippedPlayers?.[pid])
+    .filter(([, tableId]) => room.tableCards.find(c => c.tableId === tableId)?.ownerId === room.storytellerId)
+    .map(([pid]) => pid);
 
-  if (storyteller && correct.length > 0 && correct.length < allGuessers.length) {
-    addPoints(storyteller.id, 3);
+  const allPickedStoryCard = activeGuessers.length > 0 && correct.length === activeGuessers.length;
+  const nonePickedStoryCard = correct.length === 0;
+
+  // قانون Dixit الصحيح:
+  // إذا كل اللاعبين عرفوا كرت الراوي أو لا أحد عرفه:
+  // الراوي = 0، وكل اللاعبين الآخرين النشطين = +2
+  if (allPickedStoryCard || nonePickedStoryCard) {
+    activeGuessers.forEach(p => addPoints(p.id, 2));
+  } else {
+    // الحالة الطبيعية:
+    // الراوي +3، وكل من خمن كرت الراوي +3
+    addPoints(room.storytellerId, 3);
     correct.forEach(pid => addPoints(pid, 3));
   }
 
+  // نقاط الأصوات الإضافية:
+  // صاحب أي كرت غير كرت الراوي يحصل +1 عن كل صوت عليه
   for (const [voterId, tableId] of votes) {
     if (room.skippedPlayers?.[voterId]) continue;
 
