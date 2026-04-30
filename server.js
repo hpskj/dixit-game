@@ -35,6 +35,7 @@ if (CLOUDINARY_READY) {
   });
 }
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || 'dixitq8/cards';
+const CLOUDINARY_AVATAR_FOLDER = process.env.CLOUDINARY_AVATAR_FOLDER || 'dixitq8/avatars';
 
 app.use(express.json());
 
@@ -212,7 +213,7 @@ app.post('/api/auth/register', async (req, res) => {
         password_hash: passwordHash,
         display_name: displayName
       }])
-      .select('id, username, display_name, score, created_at')
+      .select('id, username, display_name, score, wins, games_played, avatar_url, created_at')
       .single();
 
     if (error) {
@@ -247,7 +248,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const { data, error } = await supabase
       .from('members')
-      .select('id, username, password_hash, display_name, score, created_at')
+      .select('id, username, password_hash, display_name, score, wins, games_played, avatar_url, created_at')
       .eq('username', username)
       .single();
 
@@ -275,6 +276,9 @@ app.post('/api/auth/login', async (req, res) => {
         username: data.username,
         display_name: data.display_name,
         score: data.score,
+        wins: data.wins || 0,
+        games_played: data.games_played || 0,
+        avatar_url: data.avatar_url || null,
         created_at: data.created_at
       },
       token
@@ -297,7 +301,7 @@ app.get('/api/auth/me', async (req, res) => {
 
     const { data, error } = await supabase
       .from('members')
-      .select('id, username, display_name, score, created_at')
+      .select('id, username, display_name, score, wins, games_played, avatar_url, created_at')
       .eq('id', member.id)
       .single();
 
@@ -309,6 +313,54 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
+
+// رفع صورة بروفايل اللاعب
+app.post('/api/profile/avatar', upload.single('avatar'), async (req, res) => {
+  try {
+    const member = getMemberFromRequest(req);
+    if (!member) return res.status(401).json({ ok: false, message: 'سجل دخولك أولاً' });
+
+    if (!req.file) {
+      return res.status(400).json({ ok: false, message: 'اختر صورة أولاً' });
+    }
+
+    if (!CLOUDINARY_READY) {
+      return res.status(500).json({ ok: false, message: 'Cloudinary غير مفعّل' });
+    }
+
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({
+        folder: CLOUDINARY_AVATAR_FOLDER,
+        resource_type: 'image',
+        public_id: 'member_' + member.id,
+        overwrite: true,
+        transformation: [
+          { width: 400, height: 400, crop: 'fill', gravity: 'face:auto' },
+          { quality: 'auto', fetch_format: 'auto' }
+        ],
+        tags: ['dixit_avatar']
+      }, (err, out) => err ? reject(err) : resolve(out));
+
+      stream.end(req.file.buffer);
+    });
+
+    const { data, error } = await supabase
+      .from('members')
+      .update({ avatar_url: result.secure_url })
+      .eq('id', member.id)
+      .select('id, username, display_name, score, wins, games_played, avatar_url, created_at')
+      .single();
+
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    res.json({ ok: true, user: data, avatar_url: result.secure_url });
+  } catch (e) {
+    console.error('Avatar upload error:', e);
+    res.status(500).json({ ok: false, message: 'فشل رفع صورة البروفايل: ' + e.message });
+  }
+});
+
+
 // بروفايل لاعب
 app.get('/api/profile/:username', async (req, res) => {
   try {
@@ -316,7 +368,7 @@ app.get('/api/profile/:username', async (req, res) => {
 
     const { data, error } = await supabase
       .from('members')
-      .select('username, display_name, score, wins, games_played, created_at')
+      .select('username, display_name, score, wins, games_played, avatar_url, created_at')
       .eq('username', username)
       .single();
 
@@ -353,7 +405,7 @@ app.get('/api/leaderboard', async (_, res) => {
   try {
     const { data, error } = await supabase
       .from('members')
-      .select('username, display_name, score, wins, games_played')
+      .select('username, display_name, score, wins, games_played, avatar_url')
       .order('score', { ascending: false })
       .limit(50);
 
