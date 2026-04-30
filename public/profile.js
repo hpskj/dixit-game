@@ -30,9 +30,16 @@ async function loadProfile() {
         <div>
           <h1>${user.display_name || user.username}</h1>
           <p class="sub">@${user.username}</p>
-          <div class="feature"><b>🏆 النقاط</b><span>${user.score || 0} نقطة</span></div>
+          <div class="features" style="margin-top:10px">
+            <div class="feature"><b>🏆 النقاط</b><span>${user.score || 0} نقطة</span></div>
+            <div class="feature"><b>👑 مرات الفوز</b><span>${user.wins || 0}</span></div>
+            <div class="feature"><b>🎮 عدد الألعاب</b><span>${user.games_played || 0}</span></div>
+            <div class="feature"><b>📅 عضو منذ</b><span>${new Date(user.created_at).toLocaleDateString('ar-KW')}</span></div>
+          </div>
           <br>
           <a class="btn secondary" href="/leaderboard.html">عرض ترتيب اللاعبين</a>
+          <br><br>
+          <a class="btn secondary" href="/matches.html">آخر المباريات</a>
         </div>
       </div>
     `;

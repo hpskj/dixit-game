@@ -19,7 +19,9 @@ async function loadLeaderboard() {
         <div class="rank">${i + 1}</div>
         <div>
           <b>${p.display_name || p.username}</b>
-          <div style="color:rgba(255,255,255,.6);font-size:14px">@${p.username}</div>
+          <div style="color:rgba(255,255,255,.6);font-size:14px">
+            @${p.username} • 🏆 ${p.wins || 0} فوز • 🎮 ${p.games_played || 0} لعبة
+          </div>
         </div>
         <div class="score">${p.score || 0} نقطة</div>
       </div>
