@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>لعبة خيال أونلاين</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="hero">
+  <div>
+    <h1>🎨 لعبة خيال أونلاين</h1>
+    <p>كروت، تلميحات، تصويت، نقاط، مؤقتات، وأصوات.</p>
+  </div>
+</header>
+
+<main>
+  <section id="joinBox" class="panel joinPanel">
+    <h2>ابدأ اللعب</h2>
+    <input id="name" placeholder="اسمك">
+    <div class="row">
+      <button id="createBtn">إنشاء غرفة</button>
+      <input id="codeInput" placeholder="كود الغرفة">
+      <button id="joinBtn">دخول</button>
+    </div>
+  </section>
+
+  <section id="gameBox" class="hidden">
+    <section class="dashboard">
+      <div class="glass roomBadge"><span>الغرفة</span><strong id="roomCode">-</strong></div>
+      <div class="glass"><span>المرحلة</span><strong id="phase">-</strong></div>
+      <div class="glass"><span>الجولة</span><strong id="round">-</strong></div>
+      <div class="timerBox">
+        <div class="timerCircle"><span id="timerText">--</span></div>
+        <small>المؤقت</small>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="panel side">
+        <h2>اللاعبون</h2>
+        <div id="players"></div>
+        <p class="muted">الهدف: أول لاعب يصل إلى 30 نقطة.</p>
+      </aside>
+
+      <section class="panel playArea">
+        <h2 id="hintTitle"></h2>
+        <div id="actions"></div>
+        <h3>كروتك</h3>
+        <div id="hand" class="cardsGrid"></div>
+        <h3>كروت الجولة</h3>
+        <div id="table" class="cardsGrid tableGrid"></div>
+      </section>
+    </section>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

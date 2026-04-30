@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>دخول الأدمن</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="hero smallHero"><div><h1>🔐 دخول الأدمن</h1><p>هذه الصفحة خاصة بصاحب الموقع فقط.</p></div><a class="adminLink" href="index.html">العودة للعبة</a></header>
+<main>
+  <section class="panel joinPanel">
+    <h2>كلمة مرور لوحة التحكم</h2>
+    <input id="password" type="password" placeholder="كلمة المرور">
+    <button id="loginBtn">دخول</button>
+    <p class="muted">الكلمة الافتراضية داخل المشروع: 123456 — غيّرها قبل النشر.</p>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',2500); }
+$('loginBtn').onclick = async () => {
+  const password = $('password').value;
+  const res = await fetch('/api/admin/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password})});
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) return toast(data.message || 'فشل تسجيل الدخول');
+  location.href = '/admin.html';
+};
+$('password').addEventListener('keydown', e => { if(e.key === 'Enter') $('loginBtn').click(); });
+</script>
+</body>
+</html>
