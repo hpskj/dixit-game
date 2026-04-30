@@ -734,6 +734,61 @@ function scoreRound(room) {
   }
 }
 
+
+function reconnectExistingPlayer(room, socket, member, fallbackName = 'لاعب') {
+  if (!room || !member?.id) return false;
+
+  const existing = room.players.find(p => p.memberId === member.id);
+  if (!existing) return false;
+
+  const oldId = existing.id;
+  const newId = socket.id;
+
+  existing.id = newId;
+  existing.connected = true;
+  existing.name = member.displayName || existing.name || fallbackName;
+  existing.username = member.username || existing.username || null;
+  existing.memberId = member.id;
+
+  // إذا كان هو صاحب الغرفة أو الراوي، حدث الـ socket id
+  if (room.hostId === oldId) room.hostId = newId;
+  if (room.storytellerId === oldId) room.storytellerId = newId;
+
+  // نقل كروت اليد من السوكيت القديم إلى الجديد
+  if (room.hands && room.hands[oldId]) {
+    room.hands[newId] = room.hands[oldId];
+    delete room.hands[oldId];
+  }
+
+  // نقل اختيار الكرت
+  if (room.submissions && room.submissions[oldId]) {
+    room.submissions[newId] = room.submissions[oldId];
+    delete room.submissions[oldId];
+  }
+
+  // نقل التصويت
+  if (room.votes && room.votes[oldId]) {
+    room.votes[newId] = room.votes[oldId];
+    delete room.votes[oldId];
+  }
+
+  // نقل حالة التخطي
+  if (room.skippedPlayers && room.skippedPlayers[oldId]) {
+    room.skippedPlayers[newId] = room.skippedPlayers[oldId];
+    delete room.skippedPlayers[oldId];
+  }
+
+  // تحديث مالك الكرت على طاولة التصويت
+  if (Array.isArray(room.tableCards)) {
+    room.tableCards.forEach(card => {
+      if (card.ownerId === oldId) card.ownerId = newId;
+    });
+  }
+
+  socket.join(room.code);
+  return true;
+}
+
 io.on('connection', socket => {
   socket.on('createRoom', (name='لاعب') => {
     const member = getUserFromSocket(socket);
@@ -751,6 +806,17 @@ io.on('connection', socket => {
     if (!room) return socket.emit('errorMessage','الغرفة غير موجودة');
 
     const member = getUserFromSocket(socket);
+
+    // إعادة اتصال حقيقية: إذا اللاعب مسجل وكان موجوداً في الغرفة، نعيده لنفس مكانه
+    if (reconnectExistingPlayer(room, socket, member, name)) {
+      socket.emit('reconnectedToRoom', {
+        code,
+        message: 'تمت إعادتك لنفس الغرفة بنفس النقاط والكروت'
+      });
+      emitRoom(code);
+      return;
+    }
+
     const displayName = member?.displayName || name || 'لاعب';
 
     room.players.push({
@@ -774,6 +840,24 @@ io.on('connection', socket => {
 
     emitRoom(code);
   });
+
+  socket.on('reconnectRoom', ({ code }) => {
+    code = (code || '').toUpperCase();
+    const room = rooms[code];
+    if (!room) return socket.emit('errorMessage','الغرفة غير موجودة');
+
+    const member = getUserFromSocket(socket);
+    if (!reconnectExistingPlayer(room, socket, member)) {
+      return socket.emit('errorMessage','لم يتم العثور على لاعب سابق بنفس الحساب داخل هذه الغرفة');
+    }
+
+    socket.emit('reconnectedToRoom', {
+      code,
+      message: 'تمت إعادتك لنفس الغرفة بنفس النقاط والكروت'
+    });
+    emitRoom(code);
+  });
+
   socket.on('startGame', async code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id) return; if (room.players.filter(p=>p.connected).length < 2) return socket.emit('errorMessage','تحتاج لاعبين على الأقل'); room.deckCards = await allCards(); if (!ensureEnoughCards(room.deckCards)) return socket.emit('errorMessage','أضف كروت أولاً من لوحة التحكم'); room.settings = readSettings(); deal(room, room.deckCards); startRound(room); emitRoom(room.code); });
   socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room)); emitRoom(room.code); });
   socket.on('submitCard', ({ code, cardId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'submit' || room.submissions[socket.id]) return;
@@ -793,6 +877,6 @@ io.on('connection', socket => {
     if (Object.keys(room.votes).length >= needed) scoreRound(room);
     emitRoom(room.code); });
   socket.on('nextRound', code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id || room.phase !== 'results') return; startRound(room); emitRoom(room.code); });
-  socket.on('disconnect', () => { Object.values(rooms).forEach(room => { const p = room.players.find(x => x.id === socket.id); if (p) { p.connected = false; emitRoom(room.code); } }); });
+  socket.on('disconnect', () => { Object.values(rooms).forEach(room => { const p = room.players.find(x => x.id === socket.id); if (p) { p.connected = false; p.disconnectedAt = Date.now(); emitRoom(room.code); } }); });
 });
 server.listen(PORT, () => console.log(`Game running at http://localhost:${PORT}`));
