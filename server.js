@@ -17,7 +17,6 @@ const supabase = createClient(
 const JWT_SECRET = process.env.JWT_SECRET || 'secret123';
 
 const app = express();
-app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
@@ -315,51 +314,6 @@ app.get('/api/auth/me', async (req, res) => {
 });
 
 
-// رفع صورة بروفايل اللاعب
-app.post('/api/profile/avatar', upload.single('avatar'), async (req, res) => {
-  try {
-    const member = getMemberFromRequest(req);
-    if (!member) return res.status(401).json({ ok: false, message: 'سجل دخولك أولاً' });
-
-    if (!req.file) {
-      return res.status(400).json({ ok: false, message: 'اختر صورة أولاً' });
-    }
-
-    if (!CLOUDINARY_READY) {
-      return res.status(500).json({ ok: false, message: 'Cloudinary غير مفعّل' });
-    }
-
-    const result = await new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream({
-        folder: CLOUDINARY_AVATAR_FOLDER,
-        resource_type: 'image',
-        public_id: 'member_' + member.id,
-        overwrite: true,
-        transformation: [
-          { width: 400, height: 400, crop: 'fill', gravity: 'face:auto' },
-          { quality: 'auto', fetch_format: 'auto' }
-        ],
-        tags: ['dixit_avatar']
-      }, (err, out) => err ? reject(err) : resolve(out));
-
-      stream.end(req.file.buffer);
-    });
-
-    const { data, error } = await supabase
-      .from('members')
-      .update({ avatar_url: result.secure_url })
-      .eq('id', member.id)
-      .select('id, username, display_name, score, wins, games_played, avatar_url, created_at')
-      .single();
-
-    if (error) return res.status(400).json({ ok: false, message: error.message });
-
-    res.json({ ok: true, user: data, avatar_url: result.secure_url });
-  } catch (e) {
-    console.error('Avatar upload error:', e);
-    res.status(500).json({ ok: false, message: 'فشل رفع صورة البروفايل: ' + e.message });
-  }
-});
 
 
 // بروفايل لاعب
@@ -472,6 +426,52 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 12 * 1024 * 1024, files: 200 },
   fileFilter: (_, file, cb) => file.mimetype.startsWith('image/') ? cb(null, true) : cb(new Error('Images only'))
+});
+
+// رفع صورة بروفايل اللاعب
+app.post('/api/profile/avatar', upload.single('avatar'), async (req, res) => {
+  try {
+    const member = getMemberFromRequest(req);
+    if (!member) return res.status(401).json({ ok: false, message: 'سجل دخولك أولاً' });
+
+    if (!req.file) {
+      return res.status(400).json({ ok: false, message: 'اختر صورة أولاً' });
+    }
+
+    if (!CLOUDINARY_READY) {
+      return res.status(500).json({ ok: false, message: 'Cloudinary غير مفعّل' });
+    }
+
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({
+        folder: CLOUDINARY_AVATAR_FOLDER,
+        resource_type: 'image',
+        public_id: 'member_' + member.id,
+        overwrite: true,
+        transformation: [
+          { width: 400, height: 400, crop: 'fill', gravity: 'face:auto' },
+          { quality: 'auto', fetch_format: 'auto' }
+        ],
+        tags: ['dixit_avatar']
+      }, (err, out) => err ? reject(err) : resolve(out));
+
+      stream.end(req.file.buffer);
+    });
+
+    const { data, error } = await supabase
+      .from('members')
+      .update({ avatar_url: result.secure_url })
+      .eq('id', member.id)
+      .select('id, username, display_name, score, wins, games_played, avatar_url, created_at')
+      .single();
+
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    res.json({ ok: true, user: data, avatar_url: result.secure_url });
+  } catch (e) {
+    console.error('Avatar upload error:', e);
+    res.status(500).json({ ok: false, message: 'فشل رفع صورة البروفايل: ' + e.message });
+  }
 });
 
 function uploadBufferToCloudinary(file, title) {
