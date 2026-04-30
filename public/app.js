@@ -1,4 +1,5 @@
-const socket = io();
+window.socket = io();
+const socket = window.socket;
 let code = '', state = null, myHand = [], myId = null, timerInterval = null;
 const $ = id => document.getElementById(id);
 
