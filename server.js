@@ -76,7 +76,63 @@ app.post('/api/admin/logout', (_, res) => {
 });
 app.get('/api/admin/check', (req, res) => res.json({ ok: isAdmin(req) }));
 
-// نظام تسجيل الأعضاء
+// ================= نظام الأعضاء =================
+function getMemberToken(req) {
+  const bearer = (req.headers.authorization || '').split(' ')[1];
+  return bearer || getCookie(req, 'member_token');
+}
+
+function getMemberFromRequest(req) {
+  const token = getMemberToken(req);
+  if (!token) return null;
+
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
+function getUserFromSocket(socket) {
+  const cookie = socket.handshake.headers.cookie || '';
+  const token = cookie
+    .split(';')
+    .map(v => v.trim())
+    .find(v => v.startsWith('member_token='))
+    ?.split('=')
+    .slice(1)
+    .join('=');
+
+  if (!token) return null;
+
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
+async function addMemberScore(memberId, points) {
+  if (!memberId || !points || points <= 0) return;
+
+  try {
+    const { data, error } = await supabase
+      .from('members')
+      .select('score')
+      .eq('id', memberId)
+      .single();
+
+    if (error || !data) return;
+
+    await supabase
+      .from('members')
+      .update({ score: Number(data.score || 0) + points })
+      .eq('id', memberId);
+  } catch (e) {
+    console.error('Score update error:', e.message);
+  }
+}
+
 app.post('/api/auth/register', async (req, res) => {
   try {
     const username = String(req.body.username || '').trim().toLowerCase();
@@ -182,22 +238,6 @@ app.post('/api/auth/logout', (_, res) => {
   res.json({ ok: true });
 });
 
-function getMemberToken(req) {
-  const bearer = (req.headers.authorization || '').split(' ')[1];
-  return bearer || getCookie(req, 'member_token');
-}
-
-function getMemberFromRequest(req) {
-  const token = getMemberToken(req);
-  if (!token) return null;
-
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch {
-    return null;
-  }
-}
-
 app.get('/api/auth/me', async (req, res) => {
   try {
     const member = getMemberFromRequest(req);
@@ -217,6 +257,28 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
+// بروفايل لاعب
+app.get('/api/profile/:username', async (req, res) => {
+  try {
+    const username = String(req.params.username || '').trim().toLowerCase();
+
+    const { data, error } = await supabase
+      .from('members')
+      .select('username, display_name, score, created_at')
+      .eq('username', username)
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ ok: false, message: 'اللاعب غير موجود' });
+    }
+
+    res.json({ ok: true, profile: data });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+// ترتيب اللاعبين
 app.get('/api/leaderboard', async (_, res) => {
   try {
     const { data, error } = await supabase
@@ -235,6 +297,12 @@ app.get('/api/leaderboard', async (_, res) => {
 
 
 
+// رابط دعوة مباشر للغرفة: https://your-domain.com/invite/ABCD
+app.get('/invite/:code', (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  res.redirect('/?room=' + encodeURIComponent(code));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
@@ -246,7 +314,7 @@ function saveSettings(settings) { writeJson(SETTINGS_FILE, settings); }
 function makeId(prefix='id') { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function roomCode() { return Math.random().toString(36).slice(2, 6).toUpperCase(); }
 function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
-function publicPlayer(p) { return { id: p.id, name: p.name, score: p.score, connected: p.connected }; }
+function publicPlayer(p) { return { id: p.id, name: p.name, score: p.score, connected: p.connected, username: p.username || null, memberId: p.memberId || null }; }
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 // منع تكرار الكروت طول اللعبة كاملة
@@ -388,10 +456,10 @@ app.post('/api/settings', requireAdmin, (req, res) => {
 
 const rooms = {};
 
-function newRoom(hostId, name) {
+function newRoom(hostId, name, member = null) {
   return {
     code: roomCode(), hostId,
-    players: [{ id: hostId, name, score: 0, connected: true }],
+    players: [{ id: hostId, name, score: 0, connected: true, memberId: member?.id || null, username: member?.username || null }],
     phase: 'lobby', round: 0, targetScore: 30, storytellerIndex: -1,
     storytellerId: null, hint: '', hands: {}, storyCardId: null,
     submissions: {}, votes: {}, skippedPlayers: {}, tableCards: [], timerEndsAt: null, timerHandle: null,
@@ -424,7 +492,7 @@ function emitRoom(code) {
         isStorytellerCard: showRoundDetails ? c.ownerId === room.storytellerId : false
       };
     }),
-    timerEndsAt: room.timerEndsAt, settings: room.settings, lastWinner: room.lastWinner
+    timerEndsAt: room.timerEndsAt, settings: room.settings, lastWinner: room.lastWinner, inviteUrl: `/invite/${code}`
   });
   room.players.forEach(p => io.to(p.id).emit('yourHand', room.hands[p.id] || []));
 }
@@ -519,6 +587,14 @@ function scoreRound(room) {
   clearTimer(room);
 
   const votes = Object.entries(room.votes);
+  const gained = {};
+
+  function addPoints(playerId, points) {
+    const p = room.players.find(x => x.id === playerId);
+    if (!p) return;
+    p.score += points;
+    gained[playerId] = (gained[playerId] || 0) + points;
+  }
 
   const correct = votes
     .filter(([pid]) => !room.skippedPlayers?.[pid])
@@ -534,11 +610,8 @@ function scoreRound(room) {
   const storyteller = room.players.find(p => p.id === room.storytellerId);
 
   if (storyteller && correct.length > 0 && correct.length < allGuessers.length) {
-    storyteller.score += 3;
-    correct.forEach(pid => {
-      const p = room.players.find(x => x.id === pid);
-      if (p) p.score += 3;
-    });
+    addPoints(storyteller.id, 3);
+    correct.forEach(pid => addPoints(pid, 3));
   }
 
   for (const [voterId, tableId] of votes) {
@@ -547,8 +620,14 @@ function scoreRound(room) {
     const card = room.tableCards.find(c => c.tableId === tableId);
     if (card && card.ownerId !== room.storytellerId) {
       const owner = room.players.find(p => p.id === card.ownerId);
-      if (owner && !room.skippedPlayers?.[owner.id]) owner.score += 1;
+      if (owner && !room.skippedPlayers?.[owner.id]) addPoints(owner.id, 1);
     }
+  }
+
+  // ربط نقاط الجولة بقاعدة البيانات للأعضاء المسجلين
+  for (const [playerId, points] of Object.entries(gained)) {
+    const player = room.players.find(p => p.id === playerId);
+    if (player?.memberId) addMemberScore(player.memberId, points);
   }
 
   room.players.forEach(p => refillHand(room, p.id));
@@ -564,15 +643,45 @@ function scoreRound(room) {
 }
 
 io.on('connection', socket => {
-  socket.on('createRoom', (name='لاعب') => { const room = newRoom(socket.id, name); rooms[room.code] = room; socket.join(room.code); socket.emit('roomCreated', room.code); emitRoom(room.code); });
-  socket.on('joinRoom', ({ name='لاعب', code }) => { code = (code || '').toUpperCase(); const room = rooms[code]; if (!room) return socket.emit('errorMessage','الغرفة غير موجودة'); room.players.push({ id: socket.id, name, score: 0, connected: true }); socket.join(code); if (room.phase !== 'lobby') {
+  socket.on('createRoom', (name='لاعب') => {
+    const member = getUserFromSocket(socket);
+    const displayName = member?.displayName || name || 'لاعب';
+    const room = newRoom(socket.id, displayName, member);
+    rooms[room.code] = room;
+    socket.join(room.code);
+    socket.emit('roomCreated', room.code);
+    socket.emit('roomInvite', { code: room.code, inviteUrl: `/invite/${room.code}` });
+    emitRoom(room.code);
+  });
+  socket.on('joinRoom', ({ name='لاعب', code }) => {
+    code = (code || '').toUpperCase();
+    const room = rooms[code];
+    if (!room) return socket.emit('errorMessage','الغرفة غير موجودة');
+
+    const member = getUserFromSocket(socket);
+    const displayName = member?.displayName || name || 'لاعب';
+
+    room.players.push({
+      id: socket.id,
+      name: displayName,
+      score: 0,
+      connected: true,
+      memberId: member?.id || null,
+      username: member?.username || null
+    });
+
+    socket.join(code);
+
+    if (room.phase !== 'lobby') {
       room.hands[socket.id] = [];
       for (let n = 0; n < 6; n++) {
         const card = drawCard(room);
         if (card) room.hands[socket.id].push(card);
       }
     }
-    emitRoom(code); });
+
+    emitRoom(code);
+  });
   socket.on('startGame', async code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id) return; if (room.players.filter(p=>p.connected).length < 2) return socket.emit('errorMessage','تحتاج لاعبين على الأقل'); room.deckCards = await allCards(); if (!ensureEnoughCards(room.deckCards)) return socket.emit('errorMessage','أضف كروت أولاً من لوحة التحكم'); room.settings = readSettings(); deal(room, room.deckCards); startRound(room); emitRoom(room.code); });
   socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room)); emitRoom(room.code); });
   socket.on('submitCard', ({ code, cardId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'submit' || room.submissions[socket.id]) return;
