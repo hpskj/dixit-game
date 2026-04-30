@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>إنشاء حساب | Dixit Q8</title>
+  <link rel="stylesheet" href="/auth.css" />
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="badge">✨ انضم للاعبين</div>
+      <h1>أنشئ حسابك في دقيقة</h1>
+      <p>بعد التسجيل، تقدر تدخل الغرف باسمك، تحفظ نقاطك، وتظهر في لوحة الترتيب.</p>
+      <div class="features">
+        <div class="feature"><b>🎮 اسم ثابت</b><span>اسمك يظهر داخل اللعبة.</span></div>
+        <div class="feature"><b>📊 نقاط محفوظة</b><span>كل جولة تضيف لرصيدك.</span></div>
+        <div class="feature"><b>🏅 منافسة</b><span>ترتيب أعلى اللاعبين.</span></div>
+        <div class="feature"><b>🚀 جاهز</b><span>متوافق مع لعبتك الحالية.</span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="logo">👤</div>
+      <h2>إنشاء حساب</h2>
+      <p class="sub">اختر اسم مستخدم وكلمة مرور.</p>
+
+      <form id="registerForm">
+        <div class="field">
+          <label>اسم العرض</label>
+          <input id="display_name" placeholder="مثال: أحمد" required />
+        </div>
+        <div class="field">
+          <label>اسم المستخدم</label>
+          <input id="username" autocomplete="username" placeholder="مثال: ahmad_q8" required />
+        </div>
+        <div class="field">
+          <label>كلمة المرور</label>
+          <input id="password" type="password" autocomplete="new-password" placeholder="6 أحرف على الأقل" required />
+        </div>
+        <button class="btn" type="submit">إنشاء الحساب</button>
+      </form>
+
+      <div id="message" class="message"></div>
+
+      <div class="row">
+        <a class="btn secondary" href="/login.html">لدي حساب</a>
+        <a class="btn secondary" href="/">العودة للعبة</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="/register.js"></script>
+</body>
+</html>

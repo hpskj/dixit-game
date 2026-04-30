@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>تسجيل الدخول | Dixit Q8</title>
+  <link rel="stylesheet" href="/auth.css" />
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="badge">🎴 لعبة خيال أونلاين</div>
+      <h1>ادخل حسابك وابدأ اللعب</h1>
+      <p>سجّل دخولك حتى يظهر اسمك الحقيقي داخل الغرفة، وتنحفظ نقاطك في ترتيب اللاعبين.</p>
+      <div class="features">
+        <div class="feature"><b>🏆 ترتيب اللاعبين</b><span>نقاطك محفوظة في حسابك.</span></div>
+        <div class="feature"><b>🔗 دعوة برابط</b><span>شارك رابط الغرفة بسهولة.</span></div>
+        <div class="feature"><b>👤 بروفايل</b><span>صفحة خاصة لكل لاعب.</span></div>
+        <div class="feature"><b>🔒 آمن</b><span>كلمات المرور مشفرة.</span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="logo">🎨</div>
+      <h2>تسجيل الدخول</h2>
+      <p class="sub">ادخل باسم المستخدم وكلمة المرور.</p>
+
+      <form id="loginForm">
+        <div class="field">
+          <label>اسم المستخدم</label>
+          <input id="username" autocomplete="username" placeholder="مثال: ahmad" required />
+        </div>
+        <div class="field">
+          <label>كلمة المرور</label>
+          <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" required />
+        </div>
+        <button class="btn" type="submit">دخول</button>
+      </form>
+
+      <div id="message" class="message"></div>
+
+      <div class="row">
+        <a class="btn secondary" href="/register.html">إنشاء حساب</a>
+        <a class="btn secondary" href="/">العودة للعبة</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="/login.js"></script>
+</body>
+</html>
