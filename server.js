@@ -5,6 +5,16 @@ const multer = require('multer');
 const { v2: cloudinary } = require('cloudinary');
 const fs = require('fs');
 const path = require('path');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
+const JWT_SECRET = process.env.JWT_SECRET || 'secret123';
 
 const app = express();
 const server = http.createServer(app);
@@ -65,6 +75,165 @@ app.post('/api/admin/logout', (_, res) => {
   res.json({ ok: true });
 });
 app.get('/api/admin/check', (req, res) => res.json({ ok: isAdmin(req) }));
+
+// نظام تسجيل الأعضاء
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const username = String(req.body.username || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+    const displayName = String(req.body.display_name || username).trim();
+
+    if (!username || !password) {
+      return res.status(400).json({ ok: false, message: 'اكتب اسم المستخدم وكلمة المرور' });
+    }
+
+    if (username.length < 3) {
+      return res.status(400).json({ ok: false, message: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ ok: false, message: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const { data, error } = await supabase
+      .from('members')
+      .insert([{
+        username,
+        password_hash: passwordHash,
+        display_name: displayName
+      }])
+      .select('id, username, display_name, score, created_at')
+      .single();
+
+    if (error) {
+      const message = error.code === '23505'
+        ? 'اسم المستخدم موجود مسبقاً'
+        : error.message;
+      return res.status(400).json({ ok: false, message });
+    }
+
+    const token = jwt.sign(
+      { id: data.id, username: data.username, displayName: data.display_name },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.setHeader('Set-Cookie', `member_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+    res.json({ ok: true, user: data, token });
+  } catch (e) {
+    console.error('Register error:', e);
+    res.status(500).json({ ok: false, message: 'فشل إنشاء الحساب: ' + e.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const username = String(req.body.username || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+
+    if (!username || !password) {
+      return res.status(400).json({ ok: false, message: 'اكتب اسم المستخدم وكلمة المرور' });
+    }
+
+    const { data, error } = await supabase
+      .from('members')
+      .select('id, username, password_hash, display_name, score, created_at')
+      .eq('username', username)
+      .single();
+
+    if (error || !data) {
+      return res.status(401).json({ ok: false, message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+    }
+
+    const match = await bcrypt.compare(password, data.password_hash);
+    if (!match) {
+      return res.status(401).json({ ok: false, message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+    }
+
+    const token = jwt.sign(
+      { id: data.id, username: data.username, displayName: data.display_name },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.setHeader('Set-Cookie', `member_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+
+    res.json({
+      ok: true,
+      user: {
+        id: data.id,
+        username: data.username,
+        display_name: data.display_name,
+        score: data.score,
+        created_at: data.created_at
+      },
+      token
+    });
+  } catch (e) {
+    console.error('Login error:', e);
+    res.status(500).json({ ok: false, message: 'فشل تسجيل الدخول: ' + e.message });
+  }
+});
+
+app.post('/api/auth/logout', (_, res) => {
+  res.setHeader('Set-Cookie', 'member_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
+  res.json({ ok: true });
+});
+
+function getMemberToken(req) {
+  const bearer = (req.headers.authorization || '').split(' ')[1];
+  return bearer || getCookie(req, 'member_token');
+}
+
+function getMemberFromRequest(req) {
+  const token = getMemberToken(req);
+  if (!token) return null;
+
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const member = getMemberFromRequest(req);
+    if (!member) return res.json({ ok: false, user: null });
+
+    const { data, error } = await supabase
+      .from('members')
+      .select('id, username, display_name, score, created_at')
+      .eq('id', member.id)
+      .single();
+
+    if (error || !data) return res.json({ ok: false, user: null });
+
+    res.json({ ok: true, user: data });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+app.get('/api/leaderboard', async (_, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('members')
+      .select('username, display_name, score')
+      .order('score', { ascending: false })
+      .limit(50);
+
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    res.json({ ok: true, leaderboard: data || [] });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+
 
 app.use(express.static(path.join(__dirname, 'public')));
 
