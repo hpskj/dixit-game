@@ -17,6 +17,7 @@ const supabase = createClient(
 const JWT_SECRET = process.env.JWT_SECRET || 'secret123';
 
 const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
