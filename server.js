@@ -133,6 +133,58 @@ async function addMemberScore(memberId, points) {
   }
 }
 
+
+async function updateMemberStats(memberId, { points = 0, win = false, gamePlayed = false } = {}) {
+  if (!memberId) return;
+
+  try {
+    const { data, error } = await supabase
+      .from('members')
+      .select('score, wins, games_played')
+      .eq('id', memberId)
+      .single();
+
+    if (error || !data) return;
+
+    const updates = {
+      score: Number(data.score || 0) + Number(points || 0),
+      wins: Number(data.wins || 0) + (win ? 1 : 0),
+      games_played: Number(data.games_played || 0) + (gamePlayed ? 1 : 0)
+    };
+
+    await supabase
+      .from('members')
+      .update(updates)
+      .eq('id', memberId);
+  } catch (e) {
+    console.error('Stats update error:', e.message);
+  }
+}
+
+async function saveMatchHistory(room) {
+  try {
+    if (!room || !room.lastWinner) return;
+
+    const players = room.players.map(p => ({
+      name: p.name,
+      username: p.username || null,
+      memberId: p.memberId || null,
+      score: p.score
+    }));
+
+    await supabase
+      .from('matches')
+      .insert([{
+        room_code: room.code,
+        winner_name: room.lastWinner.name,
+        winner_score: room.lastWinner.score,
+        players
+      }]);
+  } catch (e) {
+    console.error('Match history save error:', e.message);
+  }
+}
+
 app.post('/api/auth/register', async (req, res) => {
   try {
     const username = String(req.body.username || '').trim().toLowerCase();
@@ -264,7 +316,7 @@ app.get('/api/profile/:username', async (req, res) => {
 
     const { data, error } = await supabase
       .from('members')
-      .select('username, display_name, score, created_at')
+      .select('username, display_name, score, wins, games_played, created_at')
       .eq('username', username)
       .single();
 
@@ -278,12 +330,30 @@ app.get('/api/profile/:username', async (req, res) => {
   }
 });
 
+
+// آخر المباريات
+app.get('/api/matches', async (_, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('matches')
+      .select('room_code, winner_name, winner_score, players, created_at')
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    res.json({ ok: true, matches: data || [] });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
 // ترتيب اللاعبين
 app.get('/api/leaderboard', async (_, res) => {
   try {
     const { data, error } = await supabase
       .from('members')
-      .select('username, display_name, score')
+      .select('username, display_name, score, wins, games_played')
       .order('score', { ascending: false })
       .limit(50);
 
@@ -627,7 +697,7 @@ function scoreRound(room) {
   // ربط نقاط الجولة بقاعدة البيانات للأعضاء المسجلين
   for (const [playerId, points] of Object.entries(gained)) {
     const player = room.players.find(p => p.id === playerId);
-    if (player?.memberId) addMemberScore(player.memberId, points);
+    if (player?.memberId) updateMemberStats(player.memberId, { points });
   }
 
   room.players.forEach(p => refillHand(room, p.id));
@@ -638,6 +708,18 @@ function scoreRound(room) {
   if (winners.length) {
     room.phase = 'ended';
     room.lastWinner = { name: winners[0].name, score: winners[0].score };
+
+    // حفظ الفوز وعدد الألعاب للأعضاء المسجلين
+    room.players.forEach(p => {
+      if (p.memberId) {
+        updateMemberStats(p.memberId, {
+          win: p.id === winners[0].id,
+          gamePlayed: true
+        });
+      }
+    });
+
+    saveMatchHistory(room);
     io.to(room.code).emit('gameWinner', room.lastWinner);
   }
 }
