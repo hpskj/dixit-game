@@ -18,8 +18,8 @@ function playTone(freq=440, duration=0.12, type='sine'){
 function selectSound(){ playTone(620, .08, 'triangle'); setTimeout(()=>playTone(820,.08,'triangle'),80); }
 function winSound(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>playTone(f,.18,'sine'),i*150)); }
 
-$('createBtn').onclick=()=>{ const name=$('name').value.trim()||'لاعب'; socket.emit('createRoom',name); };
-$('joinBtn').onclick=()=>{ const name=$('name').value.trim()||'لاعب'; code=$('codeInput').value.trim().toUpperCase(); socket.emit('joinRoom',{name,code}); };
+$('createBtn').onclick=()=>{ const name=$('nameInput').value.trim()||'لاعب'; socket.emit('createRoom',name); };
+$('joinBtn').onclick=()=>{ const name=$('nameInput').value.trim()||'لاعب'; const code=$('codeInput').value.trim().toUpperCase(); socket.emit('joinRoom',{name,code}); };
 socket.on('connect',()=> myId=socket.id);
 socket.on('roomCreated',c=>{ code=c; $('codeInput').value=c; toast('تم إنشاء الغرفة'); });
 socket.on('errorMessage',toast);
