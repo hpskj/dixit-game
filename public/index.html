@@ -10,21 +10,27 @@
 <header class="hero">
   <div>
     <h1>🎨 لعبة خيال أونلاين</h1>
-    <p>كروت، تلميحات، تصويت، نقاط، ومتعة!</p>
+    <p id="welcomeText">سجّل دخولك ثم اختر غرفة اللعب المناسبة.</p>
   </div>
-  <div id="timerText" class="timerText"></div>
+  <div class="topActions">
+    <div id="timerText" class="timerText"></div>
+    <a href="/profile.html" class="adminLink">بروفايلي</a>
+    <a href="/leaderboard.html" class="adminLink">الترتيب</a>
+    <button id="logoutPlayerBtn" class="danger smallBtn" type="button">خروج</button>
+  </div>
 </header>
 
 <main>
-  <section id="joinBox" class="panel joinPanel">
-    <h2>ابدأ اللعب</h2>
-    <input id="nameInput" placeholder="اسمك">
-    <div class="joinControls">
-      <button id="joinBtn" type="button">دخول</button>
+  <section id="roomsBox" class="panel joinPanel">
+    <h2>غرف اللعب</h2>
+    <p class="muted smallHint">كل غرفة تحتوي فئة صور مختلفة يحددها الأدمن.</p>
+    <div id="roomsList" class="roomsGrid"></div>
+    <hr class="sep">
+    <h3>أو ادخل بكود دعوة</h3>
+    <div class="joinControls codeOnly">
       <input id="codeInput" placeholder="كود الغرفة">
-      <button id="createBtn" type="button">إنشاء غرفة</button>
+      <button id="joinBtn" type="button">دخول بالكود</button>
     </div>
-    <p class="muted smallHint">للدعوة: أنشئ غرفة أولاً، ثم انسخ الرابط من داخل الغرفة.</p>
   </section>
 
   <section id="gameBox" class="layout hidden">
@@ -34,7 +40,8 @@
     </aside>
 
     <section class="panel playArea">
-      <h2 id="hintTitle"></h2>
+      <h2 id="roomTitle"></h2>
+      <h3 id="hintTitle"></h3>
       <div id="actions"></div>
       <h3>🃏 يدك</h3>
       <div id="hand" class="cardsGrid"></div>
@@ -48,7 +55,6 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/app.js"></script>
-<script src="/auth-widget.js"></script>
 <script src="/smart-features.js"></script>
 </body>
 </html>

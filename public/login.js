@@ -32,8 +32,10 @@ form.addEventListener('submit', async (e) => {
     show('تم تسجيل الدخول بنجاح ✅', 'ok');
 
     setTimeout(() => {
-      const room = new URLSearchParams(location.search).get('room');
-      location.href = room ? '/?room=' + encodeURIComponent(room) : '/';
+      const params = new URLSearchParams(location.search);
+      const next = params.get('next');
+      const room = params.get('room');
+      location.href = next || (room ? '/?room=' + encodeURIComponent(room) : '/');
     }, 700);
   } catch (err) {
     show('حدث خطأ في الاتصال', 'error');

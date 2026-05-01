@@ -7,13 +7,39 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="hero smallHero"><div><h1>🛠️ لوحة التحكم</h1><p>إدارة الكروت والمؤقتات — خاصة بالأدمن فقط.</p></div><div class="rowActions"><button id="logoutBtn" class="danger">تسجيل الخروج</button><a class="adminLink" href="index.html">العودة للعبة</a></div></header>
+<header class="hero smallHero">
+  <div><h1>🛠️ لوحة التحكم</h1><p>إدارة غرف اللعب وفئات الصور.</p></div>
+  <div class="rowActions"><button id="logoutBtn" class="danger">تسجيل الخروج</button><a class="adminLink" href="index.html">العودة للموقع</a></div>
+</header>
 <main>
 <section class="panel adminGrid">
-  <div class="adminCard"><h2>⏱️ المؤقتات</h2><label>وقت اختيار الكروت / الراوي بالثواني</label><input id="selectTimer" type="number" min="5" max="300" value="30"><label>وقت التصويت بالثواني</label><input id="voteTimer" type="number" min="5" max="300" value="20"><button id="saveSettings">حفظ المؤقتات</button><p class="muted">تطبق المؤقتات الجديدة عند بدء لعبة جديدة.</p></div>
-  <div class="adminCard"><h2>➕ إضافة كرت واحد</h2><input id="singleTitle" placeholder="اسم الكرت"><input id="singleImage" type="file" accept="image/*"><button id="addSingle">إضافة</button></div>
-  <div class="adminCard"><h2>📦 إضافة مجموعة صور</h2><input id="bulkImages" type="file" accept="image/*" multiple><button id="addBulk">رفع المجموعة</button><p class="muted">اسم كل ملف يصبح اسم الكرت.</p></div>
+  <div class="adminCard">
+    <h2>➕ إنشاء غرفة / فئة صور</h2>
+    <input id="roomName" placeholder="اسم الغرفة مثل: أحلام، رعب، أطفال">
+    <input id="roomCategory" placeholder="فئة الصور مثل: خيال، طبيعة، غموض">
+    <input id="roomDescription" placeholder="وصف اختياري يظهر للاعبين">
+    <button id="addRoom">إنشاء الغرفة</button>
+    <p class="muted">بعد إنشاء الغرفة ارفع الصور الخاصة بها من بطاقتها بالأسفل.</p>
+  </div>
+  <div class="adminCard">
+    <h2>⏱️ المؤقتات</h2>
+    <label>وقت اختيار الكروت / الراوي بالثواني</label>
+    <input id="selectTimer" type="number" min="5" max="300" value="30">
+    <label>وقت التصويت بالثواني</label>
+    <input id="voteTimer" type="number" min="5" max="300" value="20">
+    <button id="saveSettings">حفظ المؤقتات</button>
+  </div>
 </section>
-<section class="panel"><h2>كل الكروت</h2><div id="cardsList" class="adminGrid"></div></section>
+
+<section class="panel">
+  <h2>الغرف الحالية</h2>
+  <div id="roomsAdminList" class="adminRooms"></div>
+</section>
+
+<section class="panel">
+  <h2>كل الصور العامة</h2>
+  <p class="muted">هذه قائمة كل الصور المرفوعة في النظام. صور الغرف تُدار من بطاقات الغرف أعلاه.</p>
+  <div id="cardsList" class="cardsGrid"></div>
+</section>
 </main>
 <div id="toast"></div><script src="admin.js"></script></body></html>

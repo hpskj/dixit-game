@@ -6,6 +6,8 @@ let state = null;
 let myHand = [];
 let myId = null;
 let timerInterval = null;
+let currentUser = null;
+let roomTemplates = [];
 
 const $ = id => document.getElementById(id);
 
@@ -269,8 +271,10 @@ function startTimer() {
 function render() {
   if (!state) return;
 
-  setHidden('joinBox', true);
+  setHidden('roomsBox', true);
   setHidden('gameBox', false);
+  const rt = $('roomTitle');
+  if (rt && state) rt.textContent = `🏠 ${state.roomName || 'غرفة'}${state.roomCategory ? ' — ' + state.roomCategory : ''}`;
 
   renderHint();
   renderPlayers();
@@ -300,22 +304,63 @@ window.voteCard = function(tableId) {
   socket.emit('vote', { code: state.code, tableId });
 };
 
-// إنشاء غرفة
-$('createBtn').onclick = () => {
-  const name = $('nameInput')?.value.trim() || 'لاعب';
-  socket.emit('createRoom', name);
+function roomCardHtml(room) {
+  const cover = room.cover ? `<img src="${room.cover}" alt="${room.name}">` : '<div class="roomCoverEmpty">🎴</div>';
+  return `
+    <article class="roomCard">
+      <div class="roomCover">${cover}</div>
+      <div class="roomInfo">
+        <b>${room.name}</b>
+        <span>${room.category || 'فئة عامة'}</span>
+        <small>${room.cardCount || 0} صورة</small>
+        ${room.description ? `<p>${room.description}</p>` : ''}
+        <button onclick="createGameFromTemplate('${room.id}')" ${room.cardCount ? '' : 'disabled'}>إنشاء لعبة من هذه الغرفة</button>
+      </div>
+    </article>
+  `;
+}
+
+async function loadRoomTemplates() {
+  const box = $('roomsList');
+  if (!box) return;
+  const res = await fetch('/api/room-templates').then(r => r.json());
+  roomTemplates = res.rooms || [];
+  box.innerHTML = roomTemplates.length
+    ? roomTemplates.map(roomCardHtml).join('')
+    : '<p class="muted">لا توجد غرف بعد. أنشئ غرفة من لوحة الأدمن وأضف صورها.</p>';
+}
+
+window.createGameFromTemplate = function(roomId) {
+  socket.emit('createRoom', { roomId });
 };
 
-// دخول غرفة
+// دخول غرفة بكود دعوة
 $('joinBtn').onclick = () => {
-  const name = $('nameInput')?.value.trim() || 'لاعب';
   const roomCode = $('codeInput')?.value.trim().toUpperCase();
   if (!roomCode) return toast('اكتب كود الغرفة');
-  socket.emit('joinRoom', { name, code: roomCode });
+  socket.emit('joinRoom', { code: roomCode });
 };
 
-socket.on('connect', () => {
+async function requirePlayerLogin() {
+  const res = await fetch('/api/auth/me').then(r => r.json()).catch(() => ({ ok:false }));
+  if (!res.ok || !res.user) {
+    const next = encodeURIComponent(location.pathname + location.search);
+    location.href = '/login.html?next=' + next;
+    return false;
+  }
+  currentUser = res.user;
+  const w = $('welcomeText');
+  if (w) w.textContent = `هلا ${currentUser.display_name || currentUser.username} — اختر غرفة وابدأ اللعب.`;
+  return true;
+}
+
+const logoutBtn = $('logoutPlayerBtn');
+if (logoutBtn) logoutBtn.onclick = async () => { await fetch('/api/auth/logout', { method:'POST' }); location.href = '/login.html'; };
+
+socket.on('connect', async () => {
   myId = socket.id;
+  if (!(await requirePlayerLogin())) return;
+  await loadRoomTemplates();
 
   const params = new URLSearchParams(location.search);
   const roomFromUrl = params.get('room') || params.get('code');
