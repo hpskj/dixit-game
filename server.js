@@ -518,17 +518,64 @@ async function allCards() {
   const seen = new Set();
   return [...localCards, ...cloudCards].filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
 }
+
+function normalizeRoomTemplate(row) {
+  const images = Array.isArray(row?.images) ? row.images : [];
+  return {
+    id: row.id,
+    name: row.name || 'غرفة بدون اسم',
+    category: row.category || '',
+    description: row.description || '',
+    cardIds: images.map(c => c.id).filter(Boolean),
+    cards: images.filter(c => c && c.id && c.image),
+    images,
+    createdAt: row.created_at || row.createdAt || new Date().toISOString()
+  };
+}
+
+async function getRoomTemplates() {
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Supabase rooms list error:', error.message);
+    return readRoomTemplates();
+  }
+
+  return (data || []).map(normalizeRoomTemplate);
+}
+
+async function getRoomTemplateById(id) {
+  if (!id) return null;
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('Supabase room get error:', error.message);
+    return readRoomTemplates().find(r => r.id === id) || null;
+  }
+
+  return data ? normalizeRoomTemplate(data) : null;
+}
+
 async function cardsForTemplate(template) {
+  if (Array.isArray(template?.cards) && template.cards.length) return template.cards;
+  if (Array.isArray(template?.images) && template.images.length) return template.images;
   const ids = new Set(template?.cardIds || []);
   if (!ids.size) return [];
   const cards = await allCards();
   return cards.filter(c => ids.has(c.id));
 }
+
 async function publicRoomTemplates() {
-  const cards = await allCards();
-  const byId = new Map(cards.map(c => [c.id, c]));
-  return readRoomTemplates().map(r => {
-    const roomCards = (r.cardIds || []).map(id => byId.get(id)).filter(Boolean);
+  const templates = await getRoomTemplates();
+  return templates.map(r => {
+    const roomCards = r.cards || r.images || [];
     return {
       id: r.id,
       name: r.name,
@@ -543,84 +590,136 @@ async function publicRoomTemplates() {
 
 app.get('/api/cards', async (_, res) => res.json(await allCards()));
 app.get('/api/room-templates', async (_, res) => res.json({ ok: true, rooms: await publicRoomTemplates() }));
+
 app.get('/api/admin/room-templates', requireAdmin, async (_, res) => {
-  const cards = await allCards();
-  const byId = new Map(cards.map(c => [c.id, c]));
-  const rooms = readRoomTemplates().map(r => ({
-    ...r,
-    cards: (r.cardIds || []).map(id => byId.get(id)).filter(Boolean),
-    cardCount: (r.cardIds || []).filter(id => byId.has(id)).length
-  }));
-  res.json({ ok: true, rooms });
+  const rooms = await getRoomTemplates();
+  res.json({
+    ok: true,
+    rooms: rooms.map(r => ({
+      ...r,
+      cards: r.cards || r.images || [],
+      cardCount: (r.cards || r.images || []).length
+    }))
+  });
 });
-app.post('/api/admin/room-templates', requireAdmin, (req, res) => {
+
+app.post('/api/admin/room-templates', requireAdmin, async (req, res) => {
   const name = String(req.body.name || '').trim();
   const category = String(req.body.category || '').trim();
   const description = String(req.body.description || '').trim();
   if (!name) return res.status(400).json({ ok:false, message:'اكتب اسم الغرفة' });
-  const rooms = readRoomTemplates();
-  const room = { id: makeId('room_'), name, category, description, cardIds: [], createdAt: new Date().toISOString() };
-  rooms.push(room);
-  saveRoomTemplates(rooms);
-  res.json({ ok:true, room });
+
+  const roomData = { name, category: category || null, description: description || null, images: [] };
+
+  const { data, error } = await supabase
+    .from('rooms')
+    .insert(roomData)
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ ok:false, message:'فشل إنشاء الغرفة في Supabase: ' + error.message });
+  res.json({ ok:true, room: normalizeRoomTemplate(data) });
 });
-app.put('/api/admin/room-templates/:id', requireAdmin, (req, res) => {
-  const rooms = readRoomTemplates();
-  const room = rooms.find(r => r.id === req.params.id);
-  if (!room) return res.status(404).json({ ok:false, message:'الغرفة غير موجودة' });
-  room.name = String(req.body.name || room.name).trim();
-  room.category = String(req.body.category || '').trim();
-  room.description = String(req.body.description || '').trim();
-  saveRoomTemplates(rooms);
-  res.json({ ok:true, room });
+
+app.put('/api/admin/room-templates/:id', requireAdmin, async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const category = String(req.body.category || '').trim();
+  const description = String(req.body.description || '').trim();
+
+  const update = {};
+  if (name) update.name = name;
+  update.category = category || null;
+  update.description = description || null;
+
+  const { data, error } = await supabase
+    .from('rooms')
+    .update(update)
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error) return res.status(404).json({ ok:false, message:'الغرفة غير موجودة أو فشل تعديلها: ' + error.message });
+  res.json({ ok:true, room: normalizeRoomTemplate(data) });
 });
-app.delete('/api/admin/room-templates/:id', requireAdmin, (req, res) => {
-  const rooms = readRoomTemplates();
-  const room = rooms.find(r => r.id === req.params.id);
-  saveRoomTemplates(rooms.filter(r => r.id !== req.params.id));
-  res.json({ ok:true, deleted: room || null });
+
+app.delete('/api/admin/room-templates/:id', requireAdmin, async (req, res) => {
+  const { data, error } = await supabase
+    .from('rooms')
+    .delete()
+    .eq('id', req.params.id)
+    .select('*')
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ ok:false, message:'فشل حذف الغرفة: ' + error.message });
+  res.json({ ok:true, deleted: data ? normalizeRoomTemplate(data) : null });
 });
+
 app.post('/api/admin/room-templates/:id/cards', requireAdmin, upload.array('images', 200), async (req, res) => {
   try {
-    const rooms = readRoomTemplates();
-    const room = rooms.find(r => r.id === req.params.id);
+    const room = await getRoomTemplateById(req.params.id);
     if (!room) return res.status(404).json({ ok:false, message:'الغرفة غير موجودة' });
+
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ ok:false, message:'اختر صوراً أولاً' });
+
     let added = [];
     if (CLOUDINARY_READY) {
       for (const file of files) {
         const title = file.originalname.replace(/\.[^.]+$/, '');
         const result = await uploadBufferToCloudinary(file, title);
-        added.push({ id: 'cloud_' + Buffer.from(result.public_id).toString('base64url'), publicId: result.public_id, title, image: result.secure_url });
+        added.push({
+          id: 'cloud_' + Buffer.from(result.public_id).toString('base64url'),
+          publicId: result.public_id,
+          title,
+          image: result.secure_url
+        });
       }
     } else {
       if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-      const cards = readCards();
       added = files.map(file => {
         const filename = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + path.extname(file.originalname).toLowerCase();
         fs.writeFileSync(path.join(UPLOAD_DIR, filename), file.buffer);
         return { id: makeId('c'), title: file.originalname.replace(/\.[^.]+$/, ''), image: '/uploads/' + filename };
       });
+
+      const cards = readCards();
       cards.push(...added);
       saveCards(cards);
     }
-    room.cardIds = [...new Set([...(room.cardIds || []), ...added.map(c => c.id)])];
-    saveRoomTemplates(rooms);
-    res.json({ ok:true, added, room });
+
+    const existing = Array.isArray(room.images) ? room.images : [];
+    const byId = new Map([...existing, ...added].map(c => [c.id, c]));
+    const images = Array.from(byId.values());
+
+    const { data, error } = await supabase
+      .from('rooms')
+      .update({ images })
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ ok:false, message:'تم رفع الصور لكن فشل حفظها في الغرفة: ' + error.message });
+    res.json({ ok:true, added, room: normalizeRoomTemplate(data) });
   } catch(e) {
     console.error(e);
     res.status(500).json({ ok:false, message:'فشل رفع صور الغرفة: ' + e.message });
   }
 });
-app.delete('/api/admin/room-templates/:roomId/cards/:cardId', requireAdmin, (req, res) => {
-  const rooms = readRoomTemplates();
-  const room = rooms.find(r => r.id === req.params.roomId);
+
+app.delete('/api/admin/room-templates/:roomId/cards/:cardId', requireAdmin, async (req, res) => {
+  const room = await getRoomTemplateById(req.params.roomId);
   if (!room) return res.status(404).json({ ok:false, message:'الغرفة غير موجودة' });
-  room.cardIds = (room.cardIds || []).filter(id => id !== req.params.cardId);
-  saveRoomTemplates(rooms);
+
+  const images = (room.images || []).filter(c => c.id !== req.params.cardId);
+  const { error } = await supabase
+    .from('rooms')
+    .update({ images })
+    .eq('id', req.params.roomId);
+
+  if (error) return res.status(500).json({ ok:false, message:'فشل إزالة الصورة من الغرفة: ' + error.message });
   res.json({ ok:true });
 });
+
 app.post('/api/cards', requireAdmin, upload.single('image'), async (req, res) => {
   try {
     const title = req.body.title || (req.file ? req.file.originalname.replace(/\.[^.]+$/, '') : 'كرت جديد');
@@ -952,7 +1051,7 @@ io.on('connection', socket => {
     if (!member) return socket.emit('errorMessage','سجّل دخولك أولاً');
 
     const roomId = typeof payload === 'string' ? null : payload.roomId;
-    const template = readRoomTemplates().find(r => r.id === roomId);
+    const template = await getRoomTemplateById(roomId);
     if (!template) return socket.emit('errorMessage','اختر غرفة من القائمة أولاً');
 
     const templateCards = await cardsForTemplate(template);
@@ -1026,7 +1125,7 @@ io.on('connection', socket => {
     emitRoom(code);
   });
 
-  socket.on('startGame', async code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id) return; if (room.players.filter(p=>p.connected).length < 2) return socket.emit('errorMessage','تحتاج لاعبين على الأقل'); if (!room.deckCards || !room.deckCards.length) { const t = readRoomTemplates().find(r => r.id === room.templateId); room.deckCards = t ? await cardsForTemplate(t) : []; } if (!ensureEnoughCards(room.deckCards)) return socket.emit('errorMessage','أضف صوراً لهذه الغرفة من لوحة التحكم'); room.settings = readSettings(); deal(room, room.deckCards); startRound(room); emitRoom(room.code); });
+  socket.on('startGame', async code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id) return; if (room.players.filter(p=>p.connected).length < 2) return socket.emit('errorMessage','تحتاج لاعبين على الأقل'); if (!room.deckCards || !room.deckCards.length) { const t = await getRoomTemplateById(room.templateId); room.deckCards = t ? await cardsForTemplate(t) : []; } if (!ensureEnoughCards(room.deckCards)) return socket.emit('errorMessage','أضف صوراً لهذه الغرفة من لوحة التحكم'); room.settings = readSettings(); deal(room, room.deckCards); startRound(room); emitRoom(room.code); });
   socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room)); emitRoom(room.code); });
   socket.on('submitCard', ({ code, cardId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'submit' || room.submissions[socket.id]) return;
     if (room.skippedPlayers?.[socket.id]) return;
