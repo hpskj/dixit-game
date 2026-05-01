@@ -720,6 +720,27 @@ app.delete('/api/admin/room-templates/:roomId/cards/:cardId', requireAdmin, asyn
   res.json({ ok:true });
 });
 
+app.post('/api/admin/room-templates/:roomId/cards/bulk-delete', requireAdmin, async (req, res) => {
+  const room = await getRoomTemplateById(req.params.roomId);
+  if (!room) return res.status(404).json({ ok:false, message:'الغرفة غير موجودة' });
+
+  const cardIds = Array.isArray(req.body.cardIds) ? req.body.cardIds.map(String) : [];
+  if (!cardIds.length) return res.status(400).json({ ok:false, message:'لم يتم تحديد صور للحذف' });
+
+  const ids = new Set(cardIds);
+  const before = Array.isArray(room.images) ? room.images : [];
+  const images = before.filter(c => !ids.has(String(c.id)));
+  const removed = before.length - images.length;
+
+  const { error } = await supabase
+    .from('rooms')
+    .update({ images })
+    .eq('id', req.params.roomId);
+
+  if (error) return res.status(500).json({ ok:false, message:'فشل حذف الصور المحددة: ' + error.message });
+  res.json({ ok:true, removed });
+});
+
 app.post('/api/cards', requireAdmin, upload.single('image'), async (req, res) => {
   try {
     const title = req.body.title || (req.file ? req.file.originalname.replace(/\.[^.]+$/, '') : 'كرت جديد');
