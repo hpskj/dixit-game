@@ -12,31 +12,46 @@ async function loadCards(){
 async function loadRooms(){
   const data = await fetch('/api/admin/room-templates').then(r=>r.json());
   const rooms = data.rooms || [];
-  $('roomsAdminList').innerHTML = rooms.length ? rooms.map(room => `
-    <article class="adminRoomCard">
-      <div class="roomAdminHead">
-        <div>
-          <h3>${room.name}</h3>
-          <p class="muted">${room.category || 'بدون فئة'} — ${room.cardCount || 0} صورة</p>
-          ${room.description ? `<p>${room.description}</p>` : ''}
-        </div>
-        <button class="danger" onclick="deleteRoom('${room.id}')">حذف الغرفة</button>
+  $('roomsAdminList').innerHTML = rooms.length ? rooms.map(room => {
+    const cards = room.cards || [];
+    const cardsHtml = cards.length ? cards.map(c => `
+      <div class="gameCard selectableCard">
+        <label class="selectImageBox">
+          <input type="checkbox" class="roomImageCheck" data-room-id="${room.id}" value="${c.id}">
+          <span>تحديد</span>
+        </label>
+        <div class="imgWrap"><img src="${c.image}"></div>
+        <p>${c.title}</p>
+        <button class="danger" onclick="removeRoomCard('${room.id}','${c.id}')">إزالة من الغرفة</button>
       </div>
-      <div class="uploadLine">
-        <input id="files_${room.id}" type="file" accept="image/*" multiple>
-        <button onclick="uploadRoomImages('${room.id}')">رفع صور لهذه الغرفة</button>
-      </div>
-      <div class="cardsGrid smallCards">
-        ${(room.cards || []).map(c => `
-          <div class="gameCard">
-            <div class="imgWrap"><img src="${c.image}"></div>
-            <p>${c.title}</p>
-            <button class="danger" onclick="removeRoomCard('${room.id}','${c.id}')">إزالة من الغرفة</button>
+    `).join('') : '<p class="muted">لا توجد صور في هذه الغرفة بعد.</p>';
+
+    return `
+      <article class="adminRoomCard">
+        <div class="roomAdminHead">
+          <div>
+            <h3>${room.name}</h3>
+            <p class="muted">${room.category || 'بدون فئة'} — ${room.cardCount || 0} صورة</p>
+            ${room.description ? `<p>${room.description}</p>` : ''}
           </div>
-        `).join('') || '<p class="muted">لا توجد صور في هذه الغرفة بعد.</p>'}
-      </div>
-    </article>
-  `).join('') : '<p class="muted">لا توجد غرف بعد.</p>';
+          <button class="danger" onclick="deleteRoom('${room.id}')">حذف الغرفة</button>
+        </div>
+        <div class="uploadLine">
+          <input id="files_${room.id}" type="file" accept="image/*" multiple>
+          <button onclick="uploadRoomImages('${room.id}')">رفع صور لهذه الغرفة</button>
+        </div>
+        <div class="bulkImageActions">
+          <button class="smallBtn" onclick="selectAllRoomImages('${room.id}', true)">تحديد الكل</button>
+          <button class="smallBtn" onclick="selectAllRoomImages('${room.id}', false)">إلغاء التحديد</button>
+          <button class="danger smallBtn" onclick="removeSelectedRoomCards('${room.id}')">حذف الصور المحددة</button>
+          <span class="muted" id="selectedCount_${room.id}">0 محددة</span>
+        </div>
+        <div class="cardsGrid smallCards">
+          ${cardsHtml}
+        </div>
+      </article>
+    `;
+  }).join('') : '<p class="muted">لا توجد غرف بعد.</p>';
 }
 
 $('addRoom').onclick = async () => {
@@ -69,6 +84,39 @@ window.uploadRoomImages = async (roomId) => {
 
 window.removeRoomCard = async (roomId, cardId) => {
   await fetch(`/api/admin/room-templates/${roomId}/cards/${cardId}`, { method:'DELETE' });
+  await loadRooms();
+};
+
+window.selectAllRoomImages = (roomId, checked) => {
+  document.querySelectorAll(`.roomImageCheck[data-room-id="${roomId}"]`).forEach(ch => { ch.checked = checked; });
+  updateSelectedCount(roomId);
+};
+
+window.updateSelectedCount = (roomId) => {
+  const count = document.querySelectorAll(`.roomImageCheck[data-room-id="${roomId}"]:checked`).length;
+  const el = $(`selectedCount_${roomId}`);
+  if (el) el.textContent = `${count} محددة`;
+};
+
+document.addEventListener('change', (event) => {
+  if (event.target && event.target.classList.contains('roomImageCheck')) {
+    updateSelectedCount(event.target.dataset.roomId);
+  }
+});
+
+window.removeSelectedRoomCards = async (roomId) => {
+  const selectedIds = [...document.querySelectorAll(`.roomImageCheck[data-room-id="${roomId}"]:checked`)].map(ch => ch.value);
+  if (!selectedIds.length) return toast('اختر صورة واحدة على الأقل');
+  if (!confirm(`حذف ${selectedIds.length} صورة من هذه الغرفة؟`)) return;
+
+  const res = await fetch(`/api/admin/room-templates/${roomId}/cards/bulk-delete`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ cardIds: selectedIds })
+  }).then(r=>r.json()).catch(() => ({ ok:false, message:'فشل الاتصال بالسيرفر' }));
+
+  if (!res.ok) return toast(res.message || 'فشل حذف الصور المحددة');
+  toast(`تم حذف ${res.removed || selectedIds.length} صورة`);
   await loadRooms();
 };
 
