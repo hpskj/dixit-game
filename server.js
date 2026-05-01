@@ -526,6 +526,8 @@ function normalizeRoomTemplate(row) {
     name: row.name || 'غرفة بدون اسم',
     category: row.category || '',
     description: row.description || '',
+    coverImage: row.cover_image || row.coverImage || '',
+    cover_image: row.cover_image || row.coverImage || '',
     cardIds: images.map(c => c.id).filter(Boolean),
     cards: images.filter(c => c && c.id && c.image),
     images,
@@ -582,7 +584,7 @@ async function publicRoomTemplates() {
       category: r.category || '',
       description: r.description || '',
       cardCount: roomCards.length,
-      cover: roomCards[0]?.image || null,
+      cover: r.coverImage || r.cover_image || roomCards[0]?.image || null,
       createdAt: r.createdAt
     };
   });
@@ -598,7 +600,9 @@ app.get('/api/admin/room-templates', requireAdmin, async (_, res) => {
     rooms: rooms.map(r => ({
       ...r,
       cards: r.cards || r.images || [],
-      cardCount: (r.cards || r.images || []).length
+      cardCount: (r.cards || r.images || []).length,
+      coverImage: r.coverImage || r.cover_image || '',
+      cover_image: r.coverImage || r.cover_image || ''
     }))
   });
 });
@@ -609,7 +613,7 @@ app.post('/api/admin/room-templates', requireAdmin, async (req, res) => {
   const description = String(req.body.description || '').trim();
   if (!name) return res.status(400).json({ ok:false, message:'اكتب اسم الغرفة' });
 
-  const roomData = { name, category: category || null, description: description || null, images: [] };
+  const roomData = { name, category: category || null, description: description || null, images: [], cover_image: null };
 
   const { data, error } = await supabase
     .from('rooms')
@@ -652,6 +656,40 @@ app.delete('/api/admin/room-templates/:id', requireAdmin, async (req, res) => {
 
   if (error) return res.status(500).json({ ok:false, message:'فشل حذف الغرفة: ' + error.message });
   res.json({ ok:true, deleted: data ? normalizeRoomTemplate(data) : null });
+});
+
+
+app.post('/api/admin/room-templates/:id/cover', requireAdmin, async (req, res) => {
+  const imageUrl = String(req.body.imageUrl || '').trim();
+  if (!imageUrl) return res.status(400).json({ ok:false, message:'اختر صورة الغلاف أولاً' });
+
+  const room = await getRoomTemplateById(req.params.id);
+  if (!room) return res.status(404).json({ ok:false, message:'الغرفة غير موجودة' });
+
+  const existsInRoom = (room.images || []).some(c => c.image === imageUrl);
+  if (!existsInRoom) return res.status(400).json({ ok:false, message:'الصورة ليست ضمن صور هذه الغرفة' });
+
+  const { data, error } = await supabase
+    .from('rooms')
+    .update({ cover_image: imageUrl })
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ ok:false, message:'فشل تعيين صورة الغلاف: ' + error.message });
+  res.json({ ok:true, room: normalizeRoomTemplate(data) });
+});
+
+app.delete('/api/admin/room-templates/:id/cover', requireAdmin, async (req, res) => {
+  const { data, error } = await supabase
+    .from('rooms')
+    .update({ cover_image: null })
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ ok:false, message:'فشل إزالة الغلاف: ' + error.message });
+  res.json({ ok:true, room: normalizeRoomTemplate(data) });
 });
 
 app.post('/api/admin/room-templates/:id/cards', requireAdmin, upload.array('images', 200), async (req, res) => {
@@ -710,10 +748,14 @@ app.delete('/api/admin/room-templates/:roomId/cards/:cardId', requireAdmin, asyn
   const room = await getRoomTemplateById(req.params.roomId);
   if (!room) return res.status(404).json({ ok:false, message:'الغرفة غير موجودة' });
 
+  const removedCard = (room.images || []).find(c => c.id === req.params.cardId);
   const images = (room.images || []).filter(c => c.id !== req.params.cardId);
+  const update = { images };
+  if (removedCard && room.coverImage && removedCard.image === room.coverImage) update.cover_image = null;
+
   const { error } = await supabase
     .from('rooms')
-    .update({ images })
+    .update(update)
     .eq('id', req.params.roomId);
 
   if (error) return res.status(500).json({ ok:false, message:'فشل إزالة الصورة من الغرفة: ' + error.message });
@@ -729,12 +771,15 @@ app.post('/api/admin/room-templates/:roomId/cards/bulk-delete', requireAdmin, as
 
   const ids = new Set(cardIds);
   const before = Array.isArray(room.images) ? room.images : [];
+  const removedCards = before.filter(c => ids.has(String(c.id)));
   const images = before.filter(c => !ids.has(String(c.id)));
   const removed = before.length - images.length;
+  const update = { images };
+  if (room.coverImage && removedCards.some(c => c.image === room.coverImage)) update.cover_image = null;
 
   const { error } = await supabase
     .from('rooms')
-    .update({ images })
+    .update(update)
     .eq('id', req.params.roomId);
 
   if (error) return res.status(500).json({ ok:false, message:'فشل حذف الصور المحددة: ' + error.message });
@@ -784,7 +829,7 @@ async function removeCardsFromAllRoomTemplates(cardIds) {
   const ids = new Set((cardIds || []).map(String));
   if (!ids.size) return 0;
 
-  const { data, error } = await supabase.from('rooms').select('id, images');
+  const { data, error } = await supabase.from('rooms').select('id, images, cover_image');
   if (error) {
     console.error('Supabase remove cards from rooms error:', error.message);
     return 0;
@@ -793,9 +838,12 @@ async function removeCardsFromAllRoomTemplates(cardIds) {
   let updatedRooms = 0;
   for (const room of data || []) {
     const before = Array.isArray(room.images) ? room.images : [];
+    const removedCards = before.filter(c => ids.has(String(c.id)));
     const images = before.filter(c => !ids.has(String(c.id)));
     if (images.length !== before.length) {
-      const { error: updateError } = await supabase.from('rooms').update({ images }).eq('id', room.id);
+      const update = { images };
+      if (room.cover_image && removedCards.some(c => c.image === room.cover_image)) update.cover_image = null;
+      const { error: updateError } = await supabase.from('rooms').update(update).eq('id', room.id);
       if (!updateError) updatedRooms += 1;
     }
   }
