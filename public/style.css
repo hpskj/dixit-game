@@ -40,3 +40,11 @@ input,button{font-family:inherit;border:0;border-radius:14px;padding:12px 14px;f
 
 
 .bulkImageActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 14px}.selectableCard{position:relative}.selectImageBox{display:flex;align-items:center;justify-content:center;gap:6px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:7px;margin-bottom:8px;font-weight:800;cursor:pointer}.selectImageBox input{width:auto;accent-color:#ffe45c}.selectImageBox span{font-size:13px;color:#fff}
+
+
+.currentCoverPreview{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;background:rgba(255,228,92,.10);border:1px solid rgba(255,228,92,.28);border-radius:14px;padding:8px}
+.currentCoverPreview img{width:74px;height:54px;object-fit:cover;border-radius:10px}
+.currentCoverPreview span{font-weight:900;color:#ffe45c}
+.coverSelectedCard{outline:2px solid #ffe45c;background:rgba(255,228,92,.10)}
+.gameCard .imgWrap{position:relative}
+.coverBadge{position:absolute;top:7px;right:7px;z-index:2;background:rgba(0,0,0,.72);color:#ffe45c;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:900}

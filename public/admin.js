@@ -32,17 +32,25 @@ async function loadRooms(){
   const rooms = data.rooms || [];
   $('roomsAdminList').innerHTML = rooms.length ? rooms.map(room => {
     const cards = room.cards || [];
-    const cardsHtml = cards.length ? cards.map(c => `
-      <div class="gameCard selectableCard">
+    const coverImage = room.coverImage || room.cover_image || '';
+    const cardsHtml = cards.length ? cards.map(c => {
+      const isCover = coverImage && c.image === coverImage;
+      return `
+      <div class="gameCard selectableCard ${isCover ? 'coverSelectedCard' : ''}">
         <label class="selectImageBox">
           <input type="checkbox" class="roomImageCheck" data-room-id="${room.id}" value="${c.id}">
           <span>تحديد</span>
         </label>
-        <div class="imgWrap"><img src="${c.image}"></div>
+        <div class="imgWrap">
+          ${isCover ? '<span class="coverBadge">⭐ الغلاف</span>' : ''}
+          <img src="${c.image}">
+        </div>
         <p>${c.title}</p>
+        <button class="smallBtn" onclick="setRoomCover('${room.id}', '${encodeURIComponent(c.image)}')">${isCover ? 'الغلاف الحالي' : 'تعيين كغلاف'}</button>
         <button class="danger" onclick="removeRoomCard('${room.id}','${c.id}')">إزالة من الغرفة</button>
       </div>
-    `).join('') : '<p class="muted">لا توجد صور في هذه الغرفة بعد.</p>';
+    `;
+    }).join('') : '<p class="muted">لا توجد صور في هذه الغرفة بعد.</p>';
 
     return `
       <article class="adminRoomCard">
@@ -51,6 +59,13 @@ async function loadRooms(){
             <h3>${room.name}</h3>
             <p class="muted">${room.category || 'بدون فئة'} — ${room.cardCount || 0} صورة</p>
             ${room.description ? `<p>${room.description}</p>` : ''}
+            ${coverImage ? `
+              <div class="currentCoverPreview">
+                <img src="${coverImage}" alt="غلاف ${room.name}">
+                <span>الغلاف الحالي</span>
+                <button class="smallBtn" onclick="clearRoomCover('${room.id}')">إزالة الغلاف</button>
+              </div>
+            ` : '<p class="muted">لا يوجد غلاف مخصص — سيتم استخدام أول صورة.</p>'}
           </div>
           <button class="danger" onclick="deleteRoom('${room.id}')">حذف الغرفة</button>
         </div>
@@ -102,6 +117,26 @@ window.uploadRoomImages = async (roomId) => {
 
 window.removeRoomCard = async (roomId, cardId) => {
   await fetch(`/api/admin/room-templates/${roomId}/cards/${cardId}`, { method:'DELETE' });
+  await loadRooms();
+};
+
+window.setRoomCover = async (roomId, encodedImageUrl) => {
+  const imageUrl = decodeURIComponent(encodedImageUrl);
+  const res = await fetch(`/api/admin/room-templates/${roomId}/cover`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ imageUrl })
+  }).then(r=>r.json()).catch(() => ({ ok:false, message:'فشل الاتصال بالسيرفر' }));
+  if (!res.ok) return toast(res.message || 'فشل تعيين الغلاف');
+  toast('تم تعيين صورة الغلاف');
+  await loadRooms();
+};
+
+window.clearRoomCover = async (roomId) => {
+  const res = await fetch(`/api/admin/room-templates/${roomId}/cover`, { method:'DELETE' })
+    .then(r=>r.json()).catch(() => ({ ok:false, message:'فشل الاتصال بالسيرفر' }));
+  if (!res.ok) return toast(res.message || 'فشل إزالة الغلاف');
+  toast('تم إزالة الغلاف المخصص');
   await loadRooms();
 };
 
