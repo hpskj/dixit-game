@@ -6,83 +6,49 @@
   <title>🎨 لعبة خيال أونلاين</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-
 <body>
-
 <header class="hero">
   <div>
     <h1>🎨 لعبة خيال أونلاين</h1>
     <p>كروت، تلميحات، تصويت، نقاط، ومتعة!</p>
   </div>
+  <div id="timerText" class="timerText"></div>
 </header>
 
 <main>
-
-  <!-- دخول -->
   <section id="joinBox" class="panel joinPanel">
     <h2>ابدأ اللعب</h2>
-
     <input id="nameInput" placeholder="اسمك">
-
-    <div style="display:flex; gap:10px; margin-top:10px;">
-      <button id="joinBtn">دخول</button>
+    <div class="joinControls">
+      <button id="joinBtn" type="button">دخول</button>
       <input id="codeInput" placeholder="كود الغرفة">
-      <button id="createBtn">إنشاء غرفة</button>
+      <button id="createBtn" type="button">إنشاء غرفة</button>
     </div>
-
-    <!-- زر الدعوة -->
-    <div style="margin-top:15px;">
-      <button onclick="copyInviteLink()">📎 نسخ رابط الدعوة</button>
-    </div>
+    <p class="muted smallHint">للدعوة: أنشئ غرفة أولاً، ثم انسخ الرابط من داخل الغرفة.</p>
   </section>
 
-  <!-- اللاعبين -->
-  <section class="layout">
+  <section id="gameBox" class="layout hidden">
     <aside class="panel side">
       <h2>👥 اللاعبين</h2>
       <div id="players"></div>
     </aside>
 
-    <!-- اللعب -->
     <section class="panel playArea">
       <h2 id="hintTitle"></h2>
       <div id="actions"></div>
-
       <h3>🃏 يدك</h3>
       <div id="hand" class="cardsGrid"></div>
-
       <h3>🎴 الطاولة</h3>
       <div id="table" class="cardsGrid tableGrid"></div>
     </section>
   </section>
-
 </main>
 
 <div id="toast"></div>
 
-<!-- السكربتات (مهم جدًا تكون بهذا الشكل) -->
 <script src="/socket.io/socket.io.js"></script>
 <script src="/app.js"></script>
 <script src="/auth-widget.js"></script>
 <script src="/smart-features.js"></script>
-
-<!-- كود الدعوة -->
-<script>
-function copyInviteLink() {
-  const codeInput = document.getElementById('codeInput');
-  const code = codeInput.value;
-
-  if (!code) {
-    alert("❗ أدخل كود الغرفة أولاً");
-    return;
-  }
-
-  const link = window.location.origin + "?room=" + code;
-
-  navigator.clipboard.writeText(link);
-  alert("✅ تم نسخ الرابط!");
-}
-</script>
-
 </body>
 </html>
