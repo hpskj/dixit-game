@@ -6,7 +6,25 @@ $('saveSettings').onclick=async()=>{ const body={selectTimer:$('selectTimer').va
 
 async function loadCards(){
   const cards=await fetch('/api/cards').then(r=>r.json());
-  $('cardsList').innerHTML=cards.map(c=>`<div class="gameCard"><div class="imgWrap"><img src="${c.image}"></div><p>${c.title}</p><button class="danger" onclick="delCard('${c.id}')">حذف نهائي</button></div>`).join('');
+  $('cardsList').innerHTML = `
+    <div class="globalBulkActions">
+      <button class="smallBtn" onclick="selectAllGlobalCards(true)">تحديد الكل</button>
+      <button class="smallBtn" onclick="selectAllGlobalCards(false)">إلغاء التحديد</button>
+      <button class="danger smallBtn" onclick="deleteSelectedGlobalCards()">حذف المحدد نهائياً</button>
+      <span class="muted" id="globalSelectedCount">0 محددة</span>
+    </div>
+    ${cards.map(c=>`
+      <div class="gameCard selectableCard">
+        <label class="selectImageBox">
+          <input type="checkbox" class="globalCardCheck" value="${c.id}">
+          <span>تحديد</span>
+        </label>
+        <div class="imgWrap"><img src="${c.image}"></div>
+        <p>${c.title}</p>
+        <button class="danger" onclick="delCard('${c.id}')">حذف نهائي</button>
+      </div>
+    `).join('')}
+  `;
 }
 
 async function loadRooms(){
@@ -102,7 +120,38 @@ document.addEventListener('change', (event) => {
   if (event.target && event.target.classList.contains('roomImageCheck')) {
     updateSelectedCount(event.target.dataset.roomId);
   }
+  if (event.target && event.target.classList.contains('globalCardCheck')) {
+    updateGlobalSelectedCount();
+  }
 });
+
+window.updateGlobalSelectedCount = () => {
+  const count = document.querySelectorAll('.globalCardCheck:checked').length;
+  const el = $('globalSelectedCount');
+  if (el) el.textContent = `${count} محددة`;
+};
+
+window.selectAllGlobalCards = (checked) => {
+  document.querySelectorAll('.globalCardCheck').forEach(ch => { ch.checked = checked; });
+  updateGlobalSelectedCount();
+};
+
+window.deleteSelectedGlobalCards = async () => {
+  const selectedIds = [...document.querySelectorAll('.globalCardCheck:checked')].map(ch => ch.value);
+  if (!selectedIds.length) return toast('اختر صورة واحدة على الأقل');
+  if (!confirm(`حذف ${selectedIds.length} صورة نهائياً من النظام؟ سيتم حذفها أيضاً من أي غرفة تستخدمها.`)) return;
+
+  const res = await fetch('/api/cards/bulk-delete', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ cardIds: selectedIds })
+  }).then(r=>r.json()).catch(() => ({ ok:false, message:'فشل الاتصال بالسيرفر' }));
+
+  if (!res.ok) return toast(res.message || 'فشل حذف الصور المحددة');
+  toast(`تم حذف ${res.deleted || selectedIds.length} صورة نهائياً`);
+  await loadCards();
+  await loadRooms();
+};
 
 window.removeSelectedRoomCards = async (roomId) => {
   const selectedIds = [...document.querySelectorAll(`.roomImageCheck[data-room-id="${roomId}"]:checked`)].map(ch => ch.value);
