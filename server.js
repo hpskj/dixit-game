@@ -780,16 +780,72 @@ app.post('/api/cards/bulk', requireAdmin, upload.array('images', 200), async (re
     cards.push(...added); saveCards(cards); res.json({ ok: true, added });
   } catch (e) { console.error(e); res.status(500).json({ ok:false, message:'فشل رفع المجموعة: ' + e.message }); }
 });
+async function removeCardsFromAllRoomTemplates(cardIds) {
+  const ids = new Set((cardIds || []).map(String));
+  if (!ids.size) return 0;
+
+  const { data, error } = await supabase.from('rooms').select('id, images');
+  if (error) {
+    console.error('Supabase remove cards from rooms error:', error.message);
+    return 0;
+  }
+
+  let updatedRooms = 0;
+  for (const room of data || []) {
+    const before = Array.isArray(room.images) ? room.images : [];
+    const images = before.filter(c => !ids.has(String(c.id)));
+    if (images.length !== before.length) {
+      const { error: updateError } = await supabase.from('rooms').update({ images }).eq('id', room.id);
+      if (!updateError) updatedRooms += 1;
+    }
+  }
+  return updatedRooms;
+}
+
+async function deleteCardsByIds(cardIds) {
+  const ids = [...new Set((cardIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return { deleted: 0, updatedRooms: 0 };
+
+  let deleted = 0;
+  for (const id of ids) {
+    const publicId = cloudIdToPublicId(id);
+    if (publicId && CLOUDINARY_READY) {
+      try {
+        await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
+        deleted += 1;
+      } catch (e) {
+        console.error('Cloudinary delete error:', e.message);
+      }
+    }
+  }
+
+  let cards = readCards();
+  const beforeLocal = cards.length;
+  cards = cards.filter(c => !ids.includes(String(c.id)));
+  if (cards.length !== beforeLocal) {
+    saveCards(cards);
+    deleted += beforeLocal - cards.length;
+  }
+
+  const updatedRooms = await removeCardsFromAllRoomTemplates(ids);
+  return { deleted, updatedRooms };
+}
+
+app.post('/api/cards/bulk-delete', requireAdmin, async (req, res) => {
+  try {
+    const cardIds = Array.isArray(req.body.cardIds) ? req.body.cardIds : [];
+    if (!cardIds.length) return res.status(400).json({ ok:false, message:'لم يتم تحديد صور للحذف' });
+    const result = await deleteCardsByIds(cardIds);
+    res.json({ ok:true, ...result });
+  } catch(e) {
+    res.status(500).json({ ok:false, message:'فشل الحذف الجماعي: ' + e.message });
+  }
+});
+
 app.delete('/api/cards/:id', requireAdmin, async (req, res) => {
   try {
-    const publicId = cloudIdToPublicId(req.params.id);
-    if (publicId && CLOUDINARY_READY) {
-      await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
-      return res.json({ ok:true, deleted:{ publicId } });
-    }
-    let cards = readCards();
-    const card = cards.find(c => c.id === req.params.id);
-    cards = cards.filter(c => c.id !== req.params.id); saveCards(cards); res.json({ ok: true, deleted: card });
+    const result = await deleteCardsByIds([req.params.id]);
+    res.json({ ok: true, deleted: result.deleted, updatedRooms: result.updatedRooms });
   } catch(e) { res.status(500).json({ ok:false, message:'فشل الحذف: ' + e.message }); }
 });
 app.get('/api/settings', (_, res) => res.json(readSettings()));
