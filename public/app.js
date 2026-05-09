@@ -256,17 +256,36 @@ function renderHint() {
 
 function startTimer() {
   clearInterval(timerInterval);
-  const el = $('timerText');
+  const topEl = $('timerText');
+  const playBox = $('playTimerBox');
+  const playEl = $('playTimerText');
   const muted = document.querySelector('.muted');
 
+  function formatTime(totalSeconds) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
+
   function tick() {
-    if (!state?.timerEndsAt) {
-      if (el) el.textContent = '';
+    const activePhase = ['story','submit','voting'].includes(state?.phase);
+    if (!state?.timerEndsAt || !activePhase) {
+      if (topEl) topEl.textContent = '';
+      if (playEl) playEl.textContent = '--';
+      if (playBox) playBox.classList.add('hidden');
       return;
     }
+
     const left = Math.max(0, Math.ceil((state.timerEndsAt - Date.now()) / 1000));
-    if (el) el.textContent = `⏱️ ${left}`;
-    if (muted && ['story','submit','voting'].includes(state.phase)) {
+    const formatted = formatTime(left);
+
+    if (topEl) topEl.textContent = `⏱️ ${formatted}`;
+    if (playEl) playEl.textContent = formatted;
+    if (playBox) {
+      playBox.classList.remove('hidden');
+      playBox.classList.toggle('warning', left <= 10);
+    }
+    if (muted && activePhase) {
       muted.textContent = `الوقت: ${left} ثانية`;
     }
   }
