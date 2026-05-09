@@ -394,8 +394,113 @@ function saveRoomTemplates(templates) { writeJson(ROOM_TEMPLATES_FILE, templates
 function makeId(prefix='id') { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function roomCode() { return Math.random().toString(36).slice(2, 6).toUpperCase(); }
 function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
-function publicPlayer(p) { return { id: p.id, name: p.name, score: p.score, connected: p.connected, username: p.username || null, memberId: p.memberId || null }; }
+function publicPlayer(p) { return { id: p.id, name: p.name, score: p.score, connected: p.connected, username: p.username || null, memberId: p.memberId || null, isBot: !!p.isBot }; }
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+
+const BOT_NAMES = ['بوت نورة', 'بوت سالم', 'بوت لولو', 'بوت بدر', 'بوت دانة', 'بوت فهد', 'بوت مريم', 'بوت راشد'];
+const BOT_HINTS = ['حلم قديم', 'سر صغير', 'رحلة غريبة', 'خارج الواقع', 'ذكرى بعيدة', 'هدوء مخيف', 'باب جديد', 'قصة ناقصة', 'ضوء في العتمة', 'شيء لا يقال'];
+function isBotPlayer(p) { return !!p?.isBot; }
+function botNameForRoom(room) {
+  const used = new Set((room.players || []).map(p => p.name));
+  return BOT_NAMES.find(n => !used.has(n)) || `بوت ${Math.floor(100 + Math.random() * 900)}`;
+}
+function makeBotPlayer(room) {
+  return {
+    id: makeId('bot'),
+    name: botNameForRoom(room),
+    score: 0,
+    connected: true,
+    isBot: true,
+    memberId: null,
+    username: null
+  };
+}
+function generateBotHint(card) {
+  const title = String(card?.title || '').replace(/[_\-.]+/g, ' ').trim();
+  if (title && Math.random() < 0.45) {
+    const words = title.split(/\s+/).filter(Boolean);
+    if (words.length) return randomFrom(words.length > 1 ? words : [title]);
+  }
+  return randomFrom(BOT_HINTS);
+}
+function chooseBotCard(room, botId) {
+  const hand = room.hands?.[botId] || [];
+  if (!hand.length) return null;
+  return randomFrom(hand);
+}
+function botVoteChoice(room, botId) {
+  const options = (room.tableCards || []).filter(c => c.ownerId !== botId);
+  if (!options.length) return null;
+  const storytellerCard = options.find(c => c.ownerId === room.storytellerId);
+  // مستوى ذكاء بسيط: أحياناً يعرف كرت الراوي، وأحياناً ينخدع بكرت آخر.
+  if (storytellerCard && Math.random() < 0.45) return storytellerCard;
+  const decoys = options.filter(c => c.ownerId !== room.storytellerId);
+  return randomFrom(decoys.length ? decoys : options);
+}
+function maybeFinishSubmit(room) {
+  const needed = room.players.filter(p => p.connected && !room.skippedPlayers?.[p.id]).length;
+  if (room.phase === 'submit' && Object.keys(room.submissions || {}).length >= needed) prepareVoting(room);
+}
+function maybeFinishVoting(room) {
+  const needed = room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.skippedPlayers?.[p.id]).length;
+  if (room.phase === 'voting' && Object.keys(room.votes || {}).length >= needed) scoreRound(room);
+}
+function runBots(room) {
+  if (!room) return;
+
+  if (room.phase === 'story') {
+    const storyteller = room.players.find(p => p.id === room.storytellerId);
+    if (!isBotPlayer(storyteller)) return;
+    setTimeout(() => {
+      if (!room || room.phase !== 'story' || room.storytellerId !== storyteller.id) return;
+      const chosen = chooseBotCard(room, storyteller.id);
+      if (!chosen) return autoStory(room);
+      const card = removeFromHand(room, storyteller.id, chosen.id);
+      if (!card) return;
+      room.hint = generateBotHint(card);
+      room.storyCardId = card.id;
+      room.submissions[storyteller.id] = card;
+      room.phase = 'submit';
+      setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room));
+      emitRoom(room.code);
+      runBots(room);
+    }, 900 + Math.floor(Math.random() * 1200));
+    return;
+  }
+
+  if (room.phase === 'submit') {
+    const bots = room.players.filter(p => isBotPlayer(p) && p.id !== room.storytellerId && !room.submissions?.[p.id] && !room.skippedPlayers?.[p.id]);
+    bots.forEach((bot, i) => {
+      setTimeout(() => {
+        if (!room || room.phase !== 'submit' || room.submissions?.[bot.id] || room.skippedPlayers?.[bot.id]) return;
+        const chosen = chooseBotCard(room, bot.id);
+        if (!chosen) return;
+        const card = removeFromHand(room, bot.id, chosen.id);
+        if (!card) return;
+        room.submissions[bot.id] = card;
+        maybeFinishSubmit(room);
+        emitRoom(room.code);
+        if (room.phase === 'voting') runBots(room);
+      }, 900 + i * 700 + Math.floor(Math.random() * 700));
+    });
+    return;
+  }
+
+  if (room.phase === 'voting') {
+    const bots = room.players.filter(p => isBotPlayer(p) && p.id !== room.storytellerId && !room.votes?.[p.id] && !room.skippedPlayers?.[p.id]);
+    bots.forEach((bot, i) => {
+      setTimeout(() => {
+        if (!room || room.phase !== 'voting' || room.votes?.[bot.id] || room.skippedPlayers?.[bot.id]) return;
+        const choice = botVoteChoice(room, bot.id);
+        if (!choice) return;
+        room.votes[bot.id] = choice.tableId;
+        maybeFinishVoting(room);
+        emitRoom(room.code);
+      }, 1000 + i * 800 + Math.floor(Math.random() * 900));
+    });
+  }
+}
 
 // منع تكرار الكروت طول اللعبة كاملة
 function resetDeck(room, sourceCards) {
@@ -1006,6 +1111,7 @@ function startRound(room) {
   room.storytellerId = room.players[room.storytellerIndex].id;
   if (!Object.keys(room.hands).length) deal(room, room.deckCards);
   setPhaseTimer(room, room.settings.selectTimer, () => autoStory(room));
+  runBots(room);
 }
 function removeFromHand(room, playerId, cardId) {
   const hand = room.hands[playerId] || [];
@@ -1034,6 +1140,7 @@ function prepareVoting(room) {
   room.tableCards = shuffle(table);
   room.phase = 'voting';
   setPhaseTimer(room, room.settings.voteTimer, () => autoVote(room));
+  runBots(room);
 }
 function autoStory(room) {
   if (!room || room.phase !== 'story') return;
@@ -1046,6 +1153,7 @@ function autoStory(room) {
   room.phase = 'submit';
   setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room));
   emitRoom(room.code);
+  runBots(room);
 }
 function autoSubmit(room) {
   if (!room || room.phase !== 'submit') return;
@@ -1389,8 +1497,24 @@ io.on('connection', socket => {
     emitRoom(code);
   });
 
+
+  socket.on('addBot', ({ code, count = 1 } = {}) => {
+    code = (code || '').toUpperCase();
+    const room = rooms[code];
+    if (!room) return socket.emit('errorMessage','الغرفة غير موجودة');
+    if (room.hostId !== socket.id) return socket.emit('errorMessage','هذه الخاصية لصاحب الغرفة فقط');
+    if (room.phase !== 'lobby') return socket.emit('errorMessage','يمكن إضافة البوتات قبل بدء اللعبة فقط');
+
+    const amount = Math.max(1, Math.min(5, Number(count) || 1));
+    const maxPlayers = 8;
+    for (let i = 0; i < amount && room.players.length < maxPlayers; i++) {
+      room.players.push(makeBotPlayer(room));
+    }
+    emitRoom(code);
+  });
+
   socket.on('startGame', async code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id) return; if (room.players.filter(p=>p.connected).length < 2) return socket.emit('errorMessage','تحتاج لاعبين على الأقل'); if (!room.deckCards || !room.deckCards.length) { const t = await getRoomTemplateById(room.templateId); room.deckCards = t ? await cardsForTemplate(t) : []; } if (!ensureEnoughCards(room.deckCards)) return socket.emit('errorMessage','أضف صوراً لهذه الغرفة من لوحة التحكم'); room.settings = readSettings(); deal(room, room.deckCards); startRound(room); emitRoom(room.code); });
-  socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room)); emitRoom(room.code); });
+  socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room)); emitRoom(room.code); runBots(room); });
   socket.on('submitCard', ({ code, cardId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'submit' || room.submissions[socket.id]) return;
     if (room.skippedPlayers?.[socket.id]) return;
     const card = removeFromHand(room, socket.id, cardId);
