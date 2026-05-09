@@ -387,7 +387,7 @@ function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file
 function writeJson(file, data) { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); }
 function readCards() { return readJson(DATA_FILE, []); }
 function saveCards(cards) { writeJson(DATA_FILE, cards); }
-function readSettings() { return { selectTimer: 30, voteTimer: 20, ...readJson(SETTINGS_FILE, {}) }; }
+function readSettings() { return { selectTimer: 30, voteTimer: 45, ...readJson(SETTINGS_FILE, {}) }; }
 function saveSettings(settings) { writeJson(SETTINGS_FILE, settings); }
 function readRoomTemplates() { return readJson(ROOM_TEMPLATES_FILE, []); }
 function saveRoomTemplates(templates) { writeJson(ROOM_TEMPLATES_FILE, templates); }
