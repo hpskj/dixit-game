@@ -225,21 +225,52 @@ function renderTable() {
     return;
   }
 
-  table.innerHTML = cards.map(card => {
-    const voters = (card.voters || []).length
-      ? `<small>الأصوات: ${(card.voters || []).join('، ')}</small>`
+  if (['results', 'ended'].includes(state.phase)) {
+    const roundSummary = (state.roundGained || []).length
+      ? `<div class="roundPointsSummary">
+          <h3>نقاط هذه الجولة</h3>
+          <div class="roundPointsList">
+            ${(state.roundGained || []).map(p => `<span>${p.name}: <b>+${p.points || 0}</b></span>`).join('')}
+          </div>
+        </div>`
       : '';
 
-    const owner = card.ownerName ? `<small>صاحب الكرت: ${card.ownerName}</small>` : '';
-    const story = card.isStorytellerCard ? `<small>🎙️ كرت الراوي</small>` : '';
+    table.innerHTML = `
+      ${roundSummary}
+      <div class="roundResultsList">
+        ${cards.map((card, index) => {
+          const voters = (card.voterDetails || []).length
+            ? card.voterDetails.map(v => `<span>${v.name}</span>`).join('')
+            : '<em>لم يختره أحد</em>';
+          const story = card.isStorytellerCard ? '<span class="storyBadge">🎙️ كرت الراوي الصحيح</span>' : '';
+          return `
+            <article class="roundResultCard ${card.isStorytellerCard ? 'storyCard' : ''}">
+              <div class="roundCardImage">
+                <img src="${card.image}" alt="" loading="lazy">
+              </div>
+              <div class="roundCardInfo">
+                <div class="roundCardHeader">
+                  <b>الكرت ${index + 1}</b>
+                  ${story}
+                </div>
+                <p>صاحب الكرت: <strong>${card.ownerName || 'لاعب'}</strong></p>
+                <p>اللاعبون الذين اختاروا هذا الكرت:</p>
+                <div class="votersList">${voters}</div>
+                <p class="roundGain">نقاط صاحب الكرت في هذه الجولة: <strong>+${card.ownerRoundPoints || 0}</strong></p>
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    `;
+    return;
+  }
 
+  table.innerHTML = cards.map(card => {
     const canVote = state.phase === 'voting' && myId !== state.storytellerId;
     return `
-      <button class="card tableCard ${card.isStorytellerCard ? 'storyCard' : ''}" ${canVote ? `onclick="voteCard('${card.id}')"` : ''}>
+      <button class="card tableCard" ${canVote ? `onclick="voteCard('${card.id}')"` : ''}>
         <img src="${card.image}" alt="" loading="lazy">
-        ${owner}
-        ${story}
-        ${voters}
       </button>
     `;
   }).join('');
