@@ -109,6 +109,7 @@ function renderPlayers() {
   players.innerHTML = rankedPlayers.map((p, index) => {
     const you = p.id === myId ? ' أنت' : '';
     const host = p.id === state.hostId ? ' 👑' : '';
+    const bot = p.isBot ? ' 🤖' : '';
     const storyteller = p.id === state.storytellerId ? ' 🎙️' : '';
     const off = p.connected ? '' : ' غير متصل';
     const safePlayerName = encodeURIComponent(p.name || 'لاعب');
@@ -120,7 +121,7 @@ function renderPlayers() {
     return `
       <div class="player rankedPlayer${rankClass} ${p.connected ? '' : 'muted'}">
         <span class="playerRank">${medal}</span>
-        <b>${p.name || 'لاعب'}${you}${host}${storyteller}</b>
+        <b>${p.name || 'لاعب'}${you}${host}${bot}${storyteller}</b>
         <span>${p.score || 0} نقطة${off}</span>
         ${kickBtn}
       </div>
@@ -140,6 +141,7 @@ function renderActions() {
         <div class="actionBox">
           <p>كود الغرفة: <b>${state.code}</b></p>
           <button onclick="copyInviteLink()">🔗 نسخ رابط الدعوة</button>
+          <button onclick="addBotToRoom()">🤖 إضافة بوت</button>
           <button onclick="socket.emit('startGame', '${state.code}')">ابدأ اللعبة</button>
         </div>
       `;
@@ -374,6 +376,11 @@ window.kickPlayer = function(playerId, playerName = 'لاعب') {
   if (!playerId || playerId === myId) return;
   if (!confirm(`هل تريد طرد ${playerName} من الغرفة؟`)) return;
   socket.emit('kickPlayer', { code: state.code, playerId });
+};
+
+window.addBotToRoom = function() {
+  if (!state || myId !== state.hostId) return;
+  socket.emit('addBot', { code: state.code, count: 1 });
 };
 
 
