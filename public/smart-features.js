@@ -63,41 +63,9 @@
   }
 
   function ensureInviteButton() {
-    if (!currentRoomCode) return;
-
-    let box = document.getElementById('smartInviteBox');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'smartInviteBox';
-      box.style.cssText = `
-        position:fixed;right:14px;top:14px;z-index:9999;
-        display:flex;gap:8px;flex-wrap:wrap;direction:rtl;
-      `;
-      document.body.appendChild(box);
-    }
-
-    const link = `${location.origin}/invite/${currentRoomCode}`;
-    box.innerHTML = `
-      <button id="copyInviteBtn" style="
-        border:0;border-radius:999px;padding:10px 14px;cursor:pointer;
-        background:linear-gradient(135deg,#ffd84d,#fff07b);color:#17152c;font-weight:900;
-        box-shadow:0 10px 30px rgba(0,0,0,.22)
-      ">🔗 نسخ رابط الدعوة</button>
-    `;
-
-    document.getElementById('copyInviteBtn').onclick = async () => {
-      beep('click');
-      try {
-        await navigator.clipboard.writeText(link);
-        document.getElementById('copyInviteBtn').textContent = '✅ تم نسخ الرابط';
-      } catch {
-        prompt('انسخ رابط الدعوة:', link);
-      }
-      setTimeout(() => {
-        const btn = document.getElementById('copyInviteBtn');
-        if (btn) btn.textContent = '🔗 نسخ رابط الدعوة';
-      }, 1600);
-    };
+    // تم تعطيل زر نسخ رابط الدعوة العلوي؛ الزر الداخلي داخل الغرفة يبقى كما هو.
+    const box = document.getElementById('smartInviteBox');
+    if (box) box.remove();
   }
 
   // أصوات عند الضغط على الأزرار والكروت
