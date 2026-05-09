@@ -947,7 +947,7 @@ function newRoom(hostId, name, member = null, template = null) {
     storytellerId: null, hint: '', hands: {}, storyCardId: null,
     submissions: {}, votes: {}, skippedPlayers: {}, tableCards: [], timerEndsAt: null, timerHandle: null,
     kickedMemberIds: [], kickedSocketIds: [],
-    settings: readSettings(), lastWinner: null, deck: [], usedCardIds: []
+    settings: readSettings(), lastWinner: null, roundGained: {}, deck: [], usedCardIds: []
   };
 }
 function clearTimer(room) { if (room.timerHandle) clearTimeout(room.timerHandle); room.timerHandle = null; room.timerEndsAt = null; }
@@ -967,15 +967,21 @@ function emitRoom(code) {
       const owner = room.players.find(p => p.id === c.ownerId);
       const voters = Object.entries(room.votes || {})
         .filter(([pid, tableId]) => tableId === c.tableId && !room.skippedPlayers?.[pid])
-        .map(([pid]) => room.players.find(p => p.id === pid)?.name)
+        .map(([pid]) => {
+          const voter = room.players.find(p => p.id === pid);
+          return voter ? { id: pid, name: voter.name || 'لاعب', roundPoints: (room.roundGained || {})[pid] || 0 } : null;
+        })
         .filter(Boolean);
       return {
         id: c.tableId, image: c.image, title: c.title,
         ownerName: showRoundDetails ? (owner?.name || 'لاعب') : null,
-        voters: showRoundDetails ? voters : [],
+        ownerRoundPoints: showRoundDetails ? ((room.roundGained || {})[c.ownerId] || 0) : 0,
+        voters: showRoundDetails ? voters.map(v => v.name) : [],
+        voterDetails: showRoundDetails ? voters : [],
         isStorytellerCard: showRoundDetails ? c.ownerId === room.storytellerId : false
       };
     }),
+    roundGained: showRoundDetails ? room.players.map(p => ({ id: p.id, name: p.name || 'لاعب', points: (room.roundGained || {})[p.id] || 0 })) : [],
     timerEndsAt: room.timerEndsAt, settings: room.settings, lastWinner: room.lastWinner, inviteUrl: `/invite/${code}`
   });
   room.players.forEach(p => io.to(p.id).emit('yourHand', room.hands[p.id] || []));
@@ -995,7 +1001,7 @@ function deal(room, sourceCards) {
 }
 function startRound(room) {
   clearTimer(room);
-  room.round += 1; room.phase = 'story'; room.hint = ''; room.storyCardId = null; room.submissions = {}; room.votes = {}; room.skippedPlayers = {}; room.tableCards = []; room.lastWinner = null;
+  room.round += 1; room.phase = 'story'; room.hint = ''; room.storyCardId = null; room.submissions = {}; room.votes = {}; room.skippedPlayers = {}; room.tableCards = []; room.lastWinner = null; room.roundGained = {};
   room.storytellerIndex = (room.storytellerIndex + 1) % room.players.length;
   room.storytellerId = room.players[room.storytellerIndex].id;
   if (!Object.keys(room.hands).length) deal(room, room.deckCards);
@@ -1123,6 +1129,8 @@ function scoreRound(room) {
     const player = room.players.find(p => p.id === playerId);
     if (player?.memberId) updateMemberStats(player.memberId, { points });
   }
+
+  room.roundGained = { ...gained };
 
   room.players.forEach(p => refillHand(room, p.id));
 
