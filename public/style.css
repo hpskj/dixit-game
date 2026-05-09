@@ -48,3 +48,33 @@ input,button{font-family:inherit;border:0;border-radius:14px;padding:12px 14px;f
 .coverSelectedCard{outline:2px solid #ffe45c;background:rgba(255,228,92,.10)}
 .gameCard .imgWrap{position:relative}
 .coverBadge{position:absolute;top:7px;right:7px;z-index:2;background:rgba(0,0,0,.72);color:#ffe45c;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:900}
+
+
+.resumeBox {
+  border: 1px solid rgba(255, 193, 7, 0.45);
+  background: rgba(255, 193, 7, 0.08);
+  border-radius: 18px;
+  padding: 14px;
+  margin: 14px 0 18px;
+}
+.resumeList {
+  display: grid;
+  gap: 10px;
+}
+.resumeCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.08);
+}
+.resumeCard small {
+  display: block;
+  opacity: 0.8;
+  margin-top: 4px;
+}
+@media (max-width: 640px) {
+  .resumeCard { flex-direction: column; align-items: stretch; }
+}

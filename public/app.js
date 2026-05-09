@@ -8,6 +8,8 @@ let myId = null;
 let timerInterval = null;
 let currentUser = null;
 let roomTemplates = [];
+const LAST_ROOM_KEY = 'dixitq8_last_room_code';
+
 
 const $ = id => document.getElementById(id);
 
@@ -304,6 +306,67 @@ window.voteCard = function(tableId) {
   socket.emit('vote', { code: state.code, tableId });
 };
 
+
+function saveLastRoom(roomCode) {
+  if (!roomCode) return;
+  try { localStorage.setItem(LAST_ROOM_KEY, String(roomCode).toUpperCase()); } catch (e) {}
+}
+
+function getLastRoom() {
+  try { return localStorage.getItem(LAST_ROOM_KEY) || ''; } catch (e) { return ''; }
+}
+
+function clearLastRoom() {
+  try { localStorage.removeItem(LAST_ROOM_KEY); } catch (e) {}
+}
+
+async function loadResumeRooms() {
+  const box = $('resumeBox');
+  if (!box || !currentUser) return;
+
+  const savedCode = getLastRoom();
+  let activeRooms = [];
+  try {
+    const res = await fetch('/api/my-active-rooms').then(r => r.json());
+    if (res.ok) activeRooms = res.rooms || [];
+  } catch (e) {}
+
+  if (savedCode && !activeRooms.some(r => r.code === savedCode)) {
+    activeRooms.unshift({ code: savedCode, roomName: 'آخر لعبة', phase: 'غير معروف', round: 0, score: 0, playersCount: 0 });
+  }
+
+  activeRooms = activeRooms.filter(r => r && r.code).slice(0, 3);
+  if (!activeRooms.length) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <h3>🔄 الرجوع للعبة السابقة</h3>
+    <p class="muted smallHint">إذا انقطع اتصالك أو خرجت من الصفحة، يمكنك الرجوع ومتابعة نفس المباراة.</p>
+    <div class="resumeList">
+      ${activeRooms.map(r => `
+        <div class="resumeCard">
+          <div>
+            <b>${r.roomName || 'غرفة'}</b>
+            <small>الكود: ${r.code} — ${phaseName(r.phase)} — الجولة ${r.round || 0}</small>
+          </div>
+          <button type="button" onclick="resumeRoom('${r.code}')">رجوع للعبة</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+window.resumeRoom = function(roomCode) {
+  if (!roomCode) return toast('لا يوجد كود لعبة محفوظ');
+  saveLastRoom(roomCode);
+  if ($('codeInput')) $('codeInput').value = roomCode;
+  socket.emit('reconnectRoom', { code: roomCode });
+};
+
 function roomCardHtml(room) {
   const cover = room.cover ? `<img src="${room.cover}" alt="${room.name}">` : '<div class="roomCoverEmpty">🎴</div>';
   return `
@@ -338,6 +401,7 @@ window.createGameFromTemplate = function(roomId) {
 $('joinBtn').onclick = () => {
   const roomCode = $('codeInput')?.value.trim().toUpperCase();
   if (!roomCode) return toast('اكتب كود الغرفة');
+  saveLastRoom(roomCode);
   socket.emit('joinRoom', { code: roomCode });
 };
 
@@ -355,11 +419,12 @@ async function requirePlayerLogin() {
 }
 
 const logoutBtn = $('logoutPlayerBtn');
-if (logoutBtn) logoutBtn.onclick = async () => { await fetch('/api/auth/logout', { method:'POST' }); location.href = '/login.html'; };
+if (logoutBtn) logoutBtn.onclick = async () => { clearLastRoom(); await fetch('/api/auth/logout', { method:'POST' }); location.href = '/login.html'; };
 
 socket.on('connect', async () => {
   myId = socket.id;
   if (!(await requirePlayerLogin())) return;
+  await loadResumeRooms();
   await loadRoomTemplates();
 
   const params = new URLSearchParams(location.search);
@@ -371,6 +436,7 @@ socket.on('connect', async () => {
 
 socket.on('roomCreated', c => {
   code = c;
+  saveLastRoom(c);
   if ($('codeInput')) $('codeInput').value = c;
   toast('تم إنشاء الغرفة');
 });
@@ -380,6 +446,7 @@ socket.on('roomInvite', data => {
 });
 
 socket.on('reconnectedToRoom', data => {
+  if (data?.code) saveLastRoom(data.code);
   toast(data?.message || 'تمت إعادة الاتصال');
 });
 
@@ -398,5 +465,8 @@ socket.on('gameWinner', w => {
 socket.on('roomState', s => {
   state = s;
   code = s.code;
+  saveLastRoom(s.code);
+  const resume = $('resumeBox');
+  if (resume) resume.classList.add('hidden');
   render();
 });
