@@ -907,6 +907,38 @@ app.post('/api/settings', requireAdmin, (req, res) => {
 
 const rooms = {};
 
+function activeRoomSummary(room, memberId) {
+  const player = room.players.find(p => p.memberId === memberId);
+  if (!player) return null;
+  return {
+    code: room.code,
+    roomName: room.roomName || 'غرفة',
+    roomCategory: room.roomCategory || '',
+    phase: room.phase,
+    round: room.round || 0,
+    score: player.score || 0,
+    connected: !!player.connected,
+    playersCount: room.players.length,
+    updatedAt: Date.now()
+  };
+}
+
+app.get('/api/my-active-rooms', (req, res) => {
+  try {
+    const member = getMemberFromRequest(req);
+    if (!member?.id) return res.json({ ok: false, rooms: [] });
+
+    const activeRooms = Object.values(rooms)
+      .map(room => activeRoomSummary(room, member.id))
+      .filter(Boolean)
+      .sort((a, b) => (b.round || 0) - (a.round || 0));
+
+    res.json({ ok: true, rooms: activeRooms });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message, rooms: [] });
+  }
+});
+
 function newRoom(hostId, name, member = null, template = null) {
   return {
     code: roomCode(), hostId, templateId: template?.id || null, roomName: template?.name || 'غرفة خاصة', roomCategory: template?.category || '',
