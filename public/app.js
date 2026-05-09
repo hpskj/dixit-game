@@ -106,10 +106,15 @@ function renderPlayers() {
     const host = p.id === state.hostId ? ' 👑' : '';
     const storyteller = p.id === state.storytellerId ? ' 🎙️' : '';
     const off = p.connected ? '' : ' غير متصل';
+    const safePlayerName = encodeURIComponent(p.name || 'لاعب');
+    const kickBtn = (myId === state.hostId && p.id !== myId)
+      ? `<button class="kickBtn" type="button" onclick="kickPlayer('${p.id}', decodeURIComponent('${safePlayerName}'))">طرد</button>`
+      : '';
     return `
       <div class="player ${p.connected ? '' : 'muted'}">
         <b>${p.name || 'لاعب'}${you}${host}${storyteller}</b>
         <span>${p.score || 0} نقطة${off}</span>
+        ${kickBtn}
       </div>
     `;
   }).join('');
@@ -307,6 +312,14 @@ window.voteCard = function(tableId) {
 };
 
 
+window.kickPlayer = function(playerId, playerName = 'لاعب') {
+  if (!state || myId !== state.hostId) return;
+  if (!playerId || playerId === myId) return;
+  if (!confirm(`هل تريد طرد ${playerName} من الغرفة؟`)) return;
+  socket.emit('kickPlayer', { code: state.code, playerId });
+};
+
+
 function saveLastRoom(roomCode) {
   if (!roomCode) return;
   try { localStorage.setItem(LAST_ROOM_KEY, String(roomCode).toUpperCase()); } catch (e) {}
@@ -451,6 +464,19 @@ socket.on('reconnectedToRoom', data => {
 });
 
 socket.on('errorMessage', toast);
+socket.on('successMessage', toast);
+
+socket.on('kickedFromRoom', data => {
+  toast(data?.message || 'تم طردك من الغرفة');
+  clearLastRoom();
+  state = null;
+  code = '';
+  myHand = [];
+  setHidden('gameBox', true);
+  setHidden('roomsBox', false);
+  loadResumeRooms();
+  loadRoomTemplates();
+});
 
 socket.on('yourHand', hand => {
   myHand = hand || [];

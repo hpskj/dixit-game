@@ -78,3 +78,13 @@ input,button{font-family:inherit;border:0;border-radius:14px;padding:12px 14px;f
 @media (max-width: 640px) {
   .resumeCard { flex-direction: column; align-items: stretch; }
 }
+
+.kickBtn{
+  background:linear-gradient(135deg,#ff7575,#ff3d5a)!important;
+  color:#fff!important;
+  padding:7px 10px!important;
+  border-radius:10px!important;
+  font-size:13px!important;
+  flex:0 0 auto;
+}
+.player span{flex:1;text-align:left}
