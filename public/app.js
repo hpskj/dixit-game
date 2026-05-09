@@ -99,17 +99,27 @@ function renderPlayers() {
   const players = $('players');
   if (!players || !state) return;
 
-  players.innerHTML = (state.players || []).map(p => {
+  const rankedPlayers = (state.players || [])
+    .map((p, originalIndex) => ({ ...p, originalIndex }))
+    .sort((a, b) => {
+      const scoreDiff = (b.score || 0) - (a.score || 0);
+      return scoreDiff !== 0 ? scoreDiff : a.originalIndex - b.originalIndex;
+    });
+
+  players.innerHTML = rankedPlayers.map((p, index) => {
     const you = p.id === myId ? ' أنت' : '';
     const host = p.id === state.hostId ? ' 👑' : '';
     const storyteller = p.id === state.storytellerId ? ' 🎙️' : '';
     const off = p.connected ? '' : ' غير متصل';
     const safePlayerName = encodeURIComponent(p.name || 'لاعب');
+    const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}`;
+    const rankClass = index < 3 ? ` rankTop${index + 1}` : '';
     const kickBtn = (myId === state.hostId && p.id !== myId)
       ? `<button class="kickBtn" type="button" onclick="kickPlayer('${p.id}', decodeURIComponent('${safePlayerName}'))">طرد</button>`
       : '';
     return `
-      <div class="player ${p.connected ? '' : 'muted'}">
+      <div class="player rankedPlayer${rankClass} ${p.connected ? '' : 'muted'}">
+        <span class="playerRank">${medal}</span>
         <b>${p.name || 'لاعب'}${you}${host}${storyteller}</b>
         <span>${p.score || 0} نقطة${off}</span>
         ${kickBtn}
