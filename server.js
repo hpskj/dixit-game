@@ -946,6 +946,7 @@ function newRoom(hostId, name, member = null, template = null) {
     phase: 'lobby', round: 0, targetScore: 30, storytellerIndex: -1,
     storytellerId: null, hint: '', hands: {}, storyCardId: null,
     submissions: {}, votes: {}, skippedPlayers: {}, tableCards: [], timerEndsAt: null, timerHandle: null,
+    kickedMemberIds: [], kickedSocketIds: [],
     settings: readSettings(), lastWinner: null, deck: [], usedCardIds: []
   };
 }
@@ -1148,8 +1149,90 @@ function scoreRound(room) {
 }
 
 
+function isPlayerKicked(room, socketId, memberId) {
+  if (!room) return false;
+  return (memberId && (room.kickedMemberIds || []).includes(memberId)) ||
+    (socketId && (room.kickedSocketIds || []).includes(socketId));
+}
+
+function removePlayerRuntimeData(room, playerId) {
+  if (!room || !playerId) return;
+  if (room.hands) delete room.hands[playerId];
+  if (room.submissions) delete room.submissions[playerId];
+  if (room.votes) delete room.votes[playerId];
+  if (room.skippedPlayers) delete room.skippedPlayers[playerId];
+  if (Array.isArray(room.tableCards)) {
+    room.tableCards = room.tableCards.filter(c => c.ownerId !== playerId);
+  }
+}
+
+function normalizeAfterKick(room, kickedWasStoryteller = false) {
+  if (!room) return;
+
+  // إذا لم يبق عدد كافٍ من اللاعبين، أعد الغرفة للانتظار بدل استمرار جولة ناقصة
+  if (room.players.length < 2) {
+    clearTimer(room);
+    room.phase = 'lobby';
+    room.storytellerIndex = -1;
+    room.storytellerId = null;
+    room.hint = '';
+    room.storyCardId = null;
+    room.submissions = {};
+    room.votes = {};
+    room.skippedPlayers = {};
+    room.tableCards = [];
+    room.timerEndsAt = null;
+    return;
+  }
+
+  if (kickedWasStoryteller && room.phase !== 'lobby') {
+    // طرد الراوي أثناء جولة نشطة: نبدأ جولة جديدة نظيفة حتى لا تتعلق اللعبة
+    const oldStorytellerIndex = Math.max(0, Math.min(room.storytellerIndex || 0, room.players.length - 1));
+    room.storytellerIndex = oldStorytellerIndex - 1;
+    startRound(room);
+    return;
+  }
+
+  if (room.phase === 'submit') {
+    const needed = room.players.filter(p => p.connected && !room.skippedPlayers?.[p.id]).length;
+    if (Object.keys(room.submissions || {}).length >= needed) prepareVoting(room);
+  }
+
+  if (room.phase === 'voting') {
+    const needed = room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.skippedPlayers?.[p.id]).length;
+    if (Object.keys(room.votes || {}).length >= needed) scoreRound(room);
+  }
+}
+
+function kickPlayerFromRoom(room, targetId, reason = 'تم طردك من الغرفة بواسطة صاحب الغرفة') {
+  const idx = room.players.findIndex(p => p.id === targetId);
+  if (idx === -1) return { ok: false, message: 'اللاعب غير موجود' };
+
+  const target = room.players[idx];
+  if (target.id === room.hostId) return { ok: false, message: 'لا يمكن طرد صاحب الغرفة' };
+
+  room.kickedMemberIds = room.kickedMemberIds || [];
+  room.kickedSocketIds = room.kickedSocketIds || [];
+  if (target.memberId && !room.kickedMemberIds.includes(target.memberId)) room.kickedMemberIds.push(target.memberId);
+  if (target.id && !room.kickedSocketIds.includes(target.id)) room.kickedSocketIds.push(target.id);
+
+  const kickedWasStoryteller = target.id === room.storytellerId;
+  room.players.splice(idx, 1);
+  removePlayerRuntimeData(room, target.id);
+
+  io.to(target.id).emit('kickedFromRoom', { code: room.code, message: reason });
+  const targetSocket = io.sockets.sockets.get(target.id);
+  if (targetSocket) targetSocket.leave(room.code);
+
+  normalizeAfterKick(room, kickedWasStoryteller);
+  return { ok: true };
+}
+
+
 function reconnectExistingPlayer(room, socket, member, fallbackName = 'لاعب') {
   if (!room || !member?.id) return false;
+
+  if (isPlayerKicked(room, socket.id, member.id)) return false;
 
   const existing = room.players.find(p => p.memberId === member.id);
   if (!existing) return false;
@@ -1230,6 +1313,7 @@ io.on('connection', socket => {
 
     const member = getUserFromSocket(socket);
     if (!member) return socket.emit('errorMessage','سجّل دخولك أولاً');
+    if (isPlayerKicked(room, socket.id, member.id)) return socket.emit('errorMessage','تم طردك من هذه الغرفة ولا يمكنك الرجوع إليها');
 
     // إعادة اتصال حقيقية: إذا اللاعب مسجل وكان موجوداً في الغرفة، نعيده لنفس مكانه
     if (reconnectExistingPlayer(room, socket, member, name)) {
@@ -1271,6 +1355,7 @@ io.on('connection', socket => {
     if (!room) return socket.emit('errorMessage','الغرفة غير موجودة');
 
     const member = getUserFromSocket(socket);
+    if (isPlayerKicked(room, socket.id, member?.id)) return socket.emit('errorMessage','تم طردك من هذه الغرفة ولا يمكنك الرجوع إليها');
     if (!reconnectExistingPlayer(room, socket, member)) {
       return socket.emit('errorMessage','لم يتم العثور على لاعب سابق بنفس الحساب داخل هذه الغرفة');
     }
@@ -1279,6 +1364,20 @@ io.on('connection', socket => {
       code,
       message: 'تمت إعادتك لنفس الغرفة بنفس النقاط والكروت'
     });
+    emitRoom(code);
+  });
+
+  socket.on('kickPlayer', ({ code, playerId }) => {
+    code = (code || '').toUpperCase();
+    const room = rooms[code];
+    if (!room) return socket.emit('errorMessage','الغرفة غير موجودة');
+    if (room.hostId !== socket.id) return socket.emit('errorMessage','هذه الخاصية لصاحب الغرفة فقط');
+    if (!playerId || playerId === socket.id) return socket.emit('errorMessage','لا يمكنك طرد نفسك');
+
+    const result = kickPlayerFromRoom(room, playerId);
+    if (!result.ok) return socket.emit('errorMessage', result.message || 'تعذر طرد اللاعب');
+
+    socket.emit('successMessage', 'تم طرد اللاعب من الغرفة');
     emitRoom(code);
   });
 
