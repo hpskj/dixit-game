@@ -81,12 +81,10 @@ window.copyInvite = copyInviteLink;
 
 function cardHtml(card, onClick, extra = '') {
   if (!card) return '';
-  const title = card.title || '';
   const image = card.image || '';
   return `
     <button class="card ${extra}" data-card="${card.id}" ${onClick ? `onclick="${onClick}"` : ''}>
-      <img src="${image}" alt="${title}" loading="lazy">
-      <span>${title}</span>
+      <img src="${image}" alt="" loading="lazy">
     </button>
   `;
 }
@@ -238,8 +236,7 @@ function renderTable() {
     const canVote = state.phase === 'voting' && myId !== state.storytellerId;
     return `
       <button class="card tableCard ${card.isStorytellerCard ? 'storyCard' : ''}" ${canVote ? `onclick="voteCard('${card.id}')"` : ''}>
-        <img src="${card.image}" alt="${card.title || ''}" loading="lazy">
-        <span>${card.title || ''}</span>
+        <img src="${card.image}" alt="" loading="lazy">
         ${owner}
         ${story}
         ${voters}
