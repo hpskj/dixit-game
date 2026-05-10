@@ -8,6 +8,9 @@ let myId = null;
 let timerInterval = null;
 let currentUser = null;
 let roomTemplates = [];
+let localVoteLocked = false;
+let localSelectedVoteId = null;
+let lastRenderKey = '';
 const LAST_ROOM_KEY = 'dixitq8_last_room_code';
 
 
@@ -279,9 +282,10 @@ function renderTable() {
   }
 
   table.innerHTML = cards.map(card => {
-    const canVote = state.phase === 'voting' && myId !== state.storytellerId;
+    const canVote = state.phase === 'voting' && myId !== state.storytellerId && !localVoteLocked;
+    const selected = localSelectedVoteId === card.id ? ' selectedVote' : '';
     return `
-      <button class="card tableCard" ${canVote ? `onclick="voteCard('${card.id}')"` : ''}>
+      <button class="card tableCard${selected}" data-table-id="${card.id}" ${canVote ? `onclick="voteCard('${card.id}')"` : 'disabled'}>
         <img src="${card.image}" alt="" loading="lazy">
       </button>
     `;
@@ -337,6 +341,13 @@ function startTimer() {
 function render() {
   if (!state) return;
 
+  const renderKey = `${state.code || ''}:${state.round || 0}:${state.phase || ''}`;
+  if (renderKey !== lastRenderKey) {
+    lastRenderKey = renderKey;
+    localVoteLocked = false;
+    localSelectedVoteId = null;
+  }
+
   setHidden('roomsBox', true);
   setHidden('gameBox', false);
   const rt = $('roomTitle');
@@ -365,7 +376,15 @@ window.submitPlayerCard = function(cardId) {
 };
 
 window.voteCard = function(tableId) {
-  if (!state) return;
+  if (!state || state.phase !== 'voting' || localVoteLocked) return;
+  localVoteLocked = true;
+  localSelectedVoteId = tableId;
+
+  document.querySelectorAll('.tableCard').forEach(btn => {
+    btn.disabled = true;
+    if (btn.dataset.tableId === tableId) btn.classList.add('selectedVote');
+  });
+
   selectSound();
   socket.emit('vote', { code: state.code, tableId });
 };
@@ -550,6 +569,17 @@ socket.on('yourHand', hand => {
 socket.on('gameWinner', w => {
   winSound();
   toast(`🏆 الفائز: ${w.name} - ${w.score} نقطة`);
+});
+
+
+socket.on('voteAccepted', ({ tableId }) => {
+  localVoteLocked = true;
+  localSelectedVoteId = tableId || localSelectedVoteId;
+  document.querySelectorAll('.tableCard').forEach(btn => {
+    btn.disabled = true;
+    btn.classList.toggle('selectedVote', btn.dataset.tableId === localSelectedVoteId);
+  });
+  toast('تم تسجيل تصويتك');
 });
 
 socket.on('roomState', s => {
