@@ -387,8 +387,58 @@ function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file
 function writeJson(file, data) { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); }
 function readCards() { return readJson(DATA_FILE, []); }
 function saveCards(cards) { writeJson(DATA_FILE, cards); }
-function readSettings() { return { ...readJson(SETTINGS_FILE, {}), selectTimer: 45, voteTimer: 45 }; }
-function saveSettings(settings) { writeJson(SETTINGS_FILE, settings); }
+function currentAiMonth() {
+  return new Date().toISOString().slice(0, 7);
+}
+const DEFAULT_SETTINGS = {
+  storyTimer: 45,
+  submitTimer: 45,
+  voteTimer: 45,
+  resultsTimer: 45,
+  aiEnabled: false,
+  aiMonthlyLimit: 0,
+  aiUsage: {
+    month: currentAiMonth(),
+    requests: 0,
+    successes: 0,
+    failures: 0
+  }
+};
+function normalizeSettings(raw = {}) {
+  const merged = { ...DEFAULT_SETTINGS, ...raw };
+  merged.storyTimer = Math.max(5, Math.min(300, Number(merged.storyTimer ?? merged.selectTimer ?? 45) || 45));
+  merged.submitTimer = Math.max(5, Math.min(300, Number(merged.submitTimer ?? merged.selectTimer ?? 45) || 45));
+  merged.voteTimer = Math.max(5, Math.min(300, Number(merged.voteTimer ?? 45) || 45));
+  merged.resultsTimer = Math.max(0, Math.min(300, Number(merged.resultsTimer ?? 45) || 45));
+  merged.selectTimer = merged.submitTimer; // توافق مع النسخ القديمة
+  merged.aiEnabled = merged.aiEnabled === true || merged.aiEnabled === 'true';
+  merged.aiMonthlyLimit = Math.max(0, Math.min(1000000, Number(merged.aiMonthlyLimit || 0) || 0));
+  const usage = merged.aiUsage && typeof merged.aiUsage === 'object' ? merged.aiUsage : {};
+  merged.aiUsage = {
+    month: usage.month || currentAiMonth(),
+    requests: Math.max(0, Number(usage.requests || 0) || 0),
+    successes: Math.max(0, Number(usage.successes || 0) || 0),
+    failures: Math.max(0, Number(usage.failures || 0) || 0)
+  };
+  if (merged.aiUsage.month !== currentAiMonth()) {
+    merged.aiUsage = { month: currentAiMonth(), requests: 0, successes: 0, failures: 0 };
+  }
+  return merged;
+}
+function readSettings() { return normalizeSettings(readJson(SETTINGS_FILE, {})); }
+function saveSettings(settings) { writeJson(SETTINGS_FILE, normalizeSettings(settings)); }
+function recordAiUsage(status = 'success') {
+  const settings = readSettings();
+  settings.aiUsage.requests += 1;
+  if (status === 'success') settings.aiUsage.successes += 1;
+  else settings.aiUsage.failures += 1;
+  saveSettings(settings);
+  return settings.aiUsage;
+}
+function aiUsageSummary() {
+  const settings = readSettings();
+  return settings.aiUsage;
+}
 function readRoomTemplates() { return readJson(ROOM_TEMPLATES_FILE, []); }
 function saveRoomTemplates(templates) { writeJson(ROOM_TEMPLATES_FILE, templates); }
 function makeId(prefix='id') { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -407,6 +457,9 @@ const AI_IMAGE_BASE_URL = (process.env.AI_IMAGE_BASE_URL || process.env.PUBLIC_B
 const AI_CACHE = new Map();
 
 function aiReady() {
+  const settings = readSettings();
+  if (!settings.aiEnabled) return false;
+  if (settings.aiMonthlyLimit && settings.aiUsage.requests >= settings.aiMonthlyLimit) return false;
   return Boolean(AI_BOTS_ENABLED && OPENAI_API_KEY && typeof fetch === 'function');
 }
 
@@ -476,14 +529,17 @@ async function openAiJson(prompt, images = [], cacheKey = '') {
     if (!resp.ok) {
       const err = await resp.text().catch(() => '');
       console.error('OpenAI bot error:', resp.status, err.slice(0, 200));
+      recordAiUsage('failure');
       return null;
     }
     const data = await resp.json();
+    recordAiUsage('success');
     const json = parseJsonObject(extractResponseText(data));
     if (json && cacheKey) AI_CACHE.set(cacheKey, json);
     return json;
   } catch (e) {
     console.error('OpenAI bot request failed:', e.message);
+    recordAiUsage('failure');
     return null;
   } finally {
     clearTimeout(timeout);
@@ -707,7 +763,7 @@ function runBots(room) {
       room.storyCardId = card.id;
       room.submissions[storyteller.id] = card;
       room.phase = 'submit';
-      setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room));
+      setPhaseTimer(room, room.settings.submitTimer, () => autoSubmit(room));
       emitRoom(room.code);
       runBots(room);
     }, 900 + Math.floor(Math.random() * 1200));
@@ -1289,11 +1345,41 @@ app.delete('/api/cards/:id', requireAdmin, async (req, res) => {
     res.json({ ok: true, deleted: result.deleted, updatedRooms: result.updatedRooms });
   } catch(e) { res.status(500).json({ ok:false, message:'فشل الحذف: ' + e.message }); }
 });
-app.get('/api/settings', (_, res) => res.json(readSettings()));
+app.get('/api/settings', (_, res) => {
+  const settings = readSettings();
+  res.json({
+    ...settings,
+    aiReady: aiReady(),
+    hasOpenAiKey: Boolean(OPENAI_API_KEY),
+    aiModel: OPENAI_MODEL,
+    aiUsage: aiUsageSummary()
+  });
+});
 app.post('/api/settings', requireAdmin, (req, res) => {
-  const settings = { selectTimer: 45, voteTimer: 45 };
+  const current = readSettings();
+  const incoming = req.body || {};
+  const settings = normalizeSettings({
+    ...current,
+    storyTimer: incoming.storyTimer ?? incoming.selectTimer ?? current.storyTimer,
+    submitTimer: incoming.submitTimer ?? incoming.selectTimer ?? current.submitTimer,
+    voteTimer: incoming.voteTimer ?? current.voteTimer,
+    resultsTimer: incoming.resultsTimer ?? current.resultsTimer,
+    aiEnabled: incoming.aiEnabled ?? current.aiEnabled,
+    aiMonthlyLimit: incoming.aiMonthlyLimit ?? current.aiMonthlyLimit,
+    aiUsage: current.aiUsage
+  });
   saveSettings(settings);
-  res.json({ ok: true, settings });
+  // حدّث إعدادات الغرف النشطة أيضاً حتى لا تنتظر بدء مباراة جديدة
+  Object.values(rooms || {}).forEach(room => {
+    room.settings = { ...(room.settings || {}), ...settings };
+  });
+  res.json({ ok: true, settings: { ...settings, aiReady: aiReady(), hasOpenAiKey: Boolean(OPENAI_API_KEY), aiModel: OPENAI_MODEL } });
+});
+app.post('/api/settings/ai-usage/reset', requireAdmin, (req, res) => {
+  const settings = readSettings();
+  settings.aiUsage = { month: currentAiMonth(), requests: 0, successes: 0, failures: 0 };
+  saveSettings(settings);
+  res.json({ ok: true, aiUsage: settings.aiUsage });
 });
 
 const rooms = {};
@@ -1402,7 +1488,7 @@ function startRound(room) {
   room.storytellerIndex = (room.storytellerIndex + 1) % room.players.length;
   room.storytellerId = room.players[room.storytellerIndex].id;
   if (!Object.keys(room.hands).length) deal(room, room.deckCards);
-  setPhaseTimer(room, room.settings.selectTimer, () => autoStory(room));
+  setPhaseTimer(room, room.settings.storyTimer, () => autoStory(room));
   runBots(room);
 }
 function removeFromHand(room, playerId, cardId) {
@@ -1443,7 +1529,7 @@ function autoStory(room) {
   room.storyCardId = card.id;
   room.submissions[room.storytellerId] = card;
   room.phase = 'submit';
-  setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room));
+  setPhaseTimer(room, room.settings.submitTimer, () => autoSubmit(room));
   emitRoom(room.code);
   runBots(room);
 }
@@ -1571,6 +1657,15 @@ function scoreRound(room) {
         players: room.tieBreakPlayers
       });
     }
+  }
+
+  // مؤقت عرض النتائج: إذا كان أكبر من صفر ينتقل تلقائياً للجولة التالية.
+  if (room.phase === 'results' && Number(room.settings?.resultsTimer || 0) > 0) {
+    setPhaseTimer(room, room.settings.resultsTimer, () => {
+      if (!room || room.phase !== 'results') return;
+      startRound(room);
+      emitRoom(room.code);
+    });
   }
 }
 
@@ -1824,7 +1919,7 @@ io.on('connection', socket => {
   });
 
   socket.on('startGame', async code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id) return; if (room.players.filter(p=>p.connected).length < 2) return socket.emit('errorMessage','تحتاج لاعبين على الأقل'); if (!room.deckCards || !room.deckCards.length) { const t = await getRoomTemplateById(room.templateId); room.deckCards = t ? await cardsForTemplate(t) : []; } if (!ensureEnoughCards(room.deckCards)) return socket.emit('errorMessage','أضف صوراً لهذه الغرفة من لوحة التحكم'); room.settings = readSettings(); deal(room, room.deckCards); startRound(room); emitRoom(room.code); });
-  socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.selectTimer, () => autoSubmit(room)); emitRoom(room.code); runBots(room); });
+  socket.on('storySubmit', ({ code, cardId, hint }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id !== room.storytellerId || room.phase !== 'story') return; const card = removeFromHand(room, socket.id, cardId); if (!card) return; room.hint = hint || 'بدون تلميح'; room.storyCardId = cardId; room.submissions[socket.id] = card; room.phase = 'submit'; setPhaseTimer(room, room.settings.submitTimer, () => autoSubmit(room)); emitRoom(room.code); runBots(room); });
   socket.on('submitCard', ({ code, cardId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'submit' || room.submissions[socket.id]) return;
     if (room.skippedPlayers?.[socket.id]) return;
     const card = removeFromHand(room, socket.id, cardId);
