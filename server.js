@@ -1525,12 +1525,20 @@ io.on('connection', socket => {
     emitRoom(room.code); });
   socket.on('vote', ({ code, tableId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'voting') return;
     if (room.skippedPlayers?.[socket.id]) return;
+    // منع التصويت المتكرر حتى لا يعاد رسم الشاشة عند بقية اللاعبين مع كل ضغطة
+    if (room.votes && room.votes[socket.id]) return socket.emit('voteAccepted', { tableId: room.votes[socket.id], alreadyVoted: true });
     const card = room.tableCards.find(c => c.tableId === tableId);
-    if (!card || card.ownerId === socket.id) return;
+    if (!card || card.ownerId === socket.id) return socket.emit('errorMessage','لا يمكنك التصويت لكرتك');
     room.votes[socket.id] = tableId;
     const needed = room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.skippedPlayers?.[p.id]).length;
-    if (Object.keys(room.votes).length >= needed) scoreRound(room);
-    emitRoom(room.code); });
+    if (Object.keys(room.votes).length >= needed) {
+      scoreRound(room);
+      emitRoom(room.code);
+    } else {
+      // لا نرسل roomState للجميع هنا لأن التصويت لا يحتاج تحديث شاشة اللاعبين الآخرين
+      socket.emit('voteAccepted', { tableId });
+    }
+  });
   socket.on('nextRound', code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id || room.phase !== 'results') return; startRound(room); emitRoom(room.code); });
   socket.on('disconnect', () => { Object.values(rooms).forEach(room => { const p = room.players.find(x => x.id === socket.id); if (p) { p.connected = false; p.disconnectedAt = Date.now(); emitRoom(room.code); } }); });
 });
