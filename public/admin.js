@@ -1,8 +1,8 @@
 fetch('/api/admin/check').then(r=>r.json()).then(d=>{ if(!d.ok) location.href='/admin-login.html'; });
 const $ = id => document.getElementById(id);
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',2500); }
-async function loadSettings(){ const s=await fetch('/api/settings').then(r=>r.json()); $('selectTimer').value=s.selectTimer; $('voteTimer').value=s.voteTimer; }
-$('saveSettings').onclick=async()=>{ const body={selectTimer:$('selectTimer').value, voteTimer:$('voteTimer').value}; await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('تم حفظ المؤقتات'); };
+async function loadSettings(){ const s=await fetch('/api/settings').then(r=>r.json()); $('selectTimer').value=45; $('voteTimer').value=45; }
+$('saveSettings').onclick=async()=>{ const body={selectTimer:45, voteTimer:45}; await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('تم حفظ المؤقتات'); };
 
 async function loadCards(){
   const cards=await fetch('/api/cards').then(r=>r.json());
