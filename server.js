@@ -398,44 +398,124 @@ function publicPlayer(p) { return { id: p.id, name: p.name, score: p.score, conn
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 
+
 const BOT_NAMES = ['بوت نورة', 'بوت سالم', 'بوت لولو', 'بوت بدر', 'بوت دانة', 'بوت فهد', 'بوت مريم', 'بوت راشد'];
-const BOT_HINTS = ['حلم قديم', 'سر صغير', 'رحلة غريبة', 'خارج الواقع', 'ذكرى بعيدة', 'هدوء مخيف', 'باب جديد', 'قصة ناقصة', 'ضوء في العتمة', 'شيء لا يقال'];
+const BOT_HINTS = [
+  'حلم قديم', 'سر صغير', 'رحلة غريبة', 'خارج الواقع', 'ذكرى بعيدة',
+  'هدوء مخيف', 'باب جديد', 'قصة ناقصة', 'ضوء في العتمة', 'شيء لا يقال',
+  'بين الخوف والأمل', 'الطريق المختفي', 'صوت من بعيد', 'قرار صعب', 'مكان لا يعود'
+];
+const BOT_STYLE_HINTS = [
+  'كأنه {word}', 'أقرب إلى {word}', 'ذكرني بـ {word}', 'ليس كما يبدو',
+  'نهاية {word}', 'قبل {word}', 'بعد {word}', '{word} بلا صوت', '{word} بعيد'
+];
+const BOT_SKILLS = [
+  { level: 'easy', accuracy: 0.28, matchBias: 0.25, bluffBias: 0.20 },
+  { level: 'normal', accuracy: 0.45, matchBias: 0.50, bluffBias: 0.35 },
+  { level: 'smart', accuracy: 0.62, matchBias: 0.75, bluffBias: 0.55 }
+];
+const BOT_STOP_WORDS = new Set(['image','img','photo','picture','card','dixit','the','and','with','from','room','new','copy','final','jpg','jpeg','png','webp','svg','صورة','كرت','لعبة','نهائي','نسخة']);
 function isBotPlayer(p) { return !!p?.isBot; }
+function botSkillForPlayer(bot) {
+  if (bot?.botSkill) return BOT_SKILLS.find(s => s.level === bot.botSkill) || BOT_SKILLS[1];
+  return BOT_SKILLS[1];
+}
+function cleanTextTokens(value) {
+  return String(value || '')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[_\-.\/\?=&%#0-9]+/g, ' ')
+    .replace(/[^\w\s؀-ۿ]/g, ' ')
+    .toLowerCase()
+    .split(/\s+/)
+    .map(w => w.trim())
+    .filter(w => w.length > 2 && !BOT_STOP_WORDS.has(w));
+}
+function cardText(card) {
+  const urlTail = String(card?.image || '').split('/').pop() || '';
+  return `${card?.title || ''} ${card?.category || ''} ${urlTail}`;
+}
+function cardTokens(card) { return cleanTextTokens(cardText(card)); }
+function similarityScore(card, hint) {
+  const a = new Set(cardTokens(card));
+  const b = new Set(cleanTextTokens(hint));
+  if (!a.size || !b.size) return Math.random() * 0.05;
+  let score = 0;
+  b.forEach(t => { if (a.has(t)) score += 1; });
+  return score / Math.max(1, Math.sqrt(a.size * b.size));
+}
+function weightedPick(items, weightFn) {
+  if (!items.length) return null;
+  const weighted = items.map(item => ({ item, weight: Math.max(0.01, Number(weightFn(item)) || 0.01) }));
+  const total = weighted.reduce((s, x) => s + x.weight, 0);
+  let r = Math.random() * total;
+  for (const x of weighted) {
+    r -= x.weight;
+    if (r <= 0) return x.item;
+  }
+  return weighted[weighted.length - 1].item;
+}
 function botNameForRoom(room) {
   const used = new Set((room.players || []).map(p => p.name));
   return BOT_NAMES.find(n => !used.has(n)) || `بوت ${Math.floor(100 + Math.random() * 900)}`;
 }
 function makeBotPlayer(room) {
+  const skill = randomFrom(BOT_SKILLS);
   return {
     id: makeId('bot'),
     name: botNameForRoom(room),
     score: 0,
     connected: true,
     isBot: true,
+    botSkill: skill.level,
     memberId: null,
     username: null
   };
 }
 function generateBotHint(card) {
-  const title = String(card?.title || '').replace(/[_\-.]+/g, ' ').trim();
-  if (title && Math.random() < 0.45) {
-    const words = title.split(/\s+/).filter(Boolean);
-    if (words.length) return randomFrom(words.length > 1 ? words : [title]);
+  const tokens = cardTokens(card).filter(w => w.length > 3);
+  if (tokens.length && Math.random() < 0.75) {
+    const word = randomFrom(tokens.slice(0, 5));
+    if (Math.random() < 0.55) return randomFrom(BOT_STYLE_HINTS).replace('{word}', word);
+    return word;
   }
   return randomFrom(BOT_HINTS);
 }
-function chooseBotCard(room, botId) {
+function chooseBotCard(room, botId, purpose = 'submit') {
   const hand = room.hands?.[botId] || [];
   if (!hand.length) return null;
+  const bot = room.players.find(p => p.id === botId);
+  const skill = botSkillForPlayer(bot);
+
+  if (purpose === 'submit' && room.hint) {
+    const best = weightedPick(hand, card => {
+      const sim = similarityScore(card, room.hint);
+      return 1 + (sim * 10 * skill.bluffBias) + Math.random();
+    });
+    if (best && Math.random() < skill.matchBias) return best;
+  }
+
+  if (purpose === 'story') {
+    return weightedPick(hand, card => 1 + Math.min(4, cardTokens(card).length));
+  }
+
   return randomFrom(hand);
 }
 function botVoteChoice(room, botId) {
   const options = (room.tableCards || []).filter(c => c.ownerId !== botId);
   if (!options.length) return null;
+  const bot = room.players.find(p => p.id === botId);
+  const skill = botSkillForPlayer(bot);
   const storytellerCard = options.find(c => c.ownerId === room.storytellerId);
-  // مستوى ذكاء بسيط: أحياناً يعرف كرت الراوي، وأحياناً ينخدع بكرت آخر.
-  if (storytellerCard && Math.random() < 0.45) return storytellerCard;
   const decoys = options.filter(c => c.ownerId !== room.storytellerId);
+
+  const bestByHint = weightedPick(options, card => {
+    const sim = similarityScore(card, room.hint);
+    const storytellerBoost = card.ownerId === room.storytellerId ? skill.accuracy : 0;
+    return 1 + sim * 12 + storytellerBoost * 2 + Math.random();
+  });
+
+  if (storytellerCard && Math.random() < skill.accuracy) return storytellerCard;
+  if (bestByHint && Math.random() < skill.matchBias) return bestByHint;
   return randomFrom(decoys.length ? decoys : options);
 }
 function maybeFinishSubmit(room) {
@@ -454,7 +534,7 @@ function runBots(room) {
     if (!isBotPlayer(storyteller)) return;
     setTimeout(() => {
       if (!room || room.phase !== 'story' || room.storytellerId !== storyteller.id) return;
-      const chosen = chooseBotCard(room, storyteller.id);
+      const chosen = chooseBotCard(room, storyteller.id, 'story');
       if (!chosen) return autoStory(room);
       const card = removeFromHand(room, storyteller.id, chosen.id);
       if (!card) return;
@@ -474,7 +554,7 @@ function runBots(room) {
     bots.forEach((bot, i) => {
       setTimeout(() => {
         if (!room || room.phase !== 'submit' || room.submissions?.[bot.id] || room.skippedPlayers?.[bot.id]) return;
-        const chosen = chooseBotCard(room, bot.id);
+        const chosen = chooseBotCard(room, bot.id, 'submit');
         if (!chosen) return;
         const card = removeFromHand(room, bot.id, chosen.id);
         if (!card) return;
