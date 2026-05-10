@@ -1,4 +1,14 @@
 {
-  "selectTimer": 30,
-  "voteTimer": 45
+  "storyTimer": 45,
+  "submitTimer": 45,
+  "voteTimer": 45,
+  "resultsTimer": 45,
+  "aiEnabled": false,
+  "aiMonthlyLimit": 0,
+  "aiUsage": {
+    "month": "2026-05",
+    "requests": 0,
+    "successes": 0,
+    "failures": 0
+  }
 }
