@@ -22,12 +22,35 @@
     <p class="muted">بعد إنشاء الغرفة ارفع الصور الخاصة بها من بطاقتها بالأسفل.</p>
   </div>
   <div class="adminCard">
-    <h2>⏱️ المؤقتات</h2>
-    <label>وقت اختيار الكروت / الراوي بالثواني</label>
-    <input id="selectTimer" type="number" min="5" max="300" value="30">
-    <label>وقت التصويت بالثواني</label>
+    <h2>⏱️ مؤقتات اللعبة</h2>
+    <label>وقت الراوي لاختيار الكرت وكتابة التلميح</label>
+    <input id="storyTimer" type="number" min="5" max="300" value="45">
+    <label>وقت اللاعبين لاختيار الكروت</label>
+    <input id="submitTimer" type="number" min="5" max="300" value="45">
+    <label>وقت التصويت</label>
     <input id="voteTimer" type="number" min="5" max="300" value="45">
-    <button id="saveSettings">حفظ المؤقتات</button>
+    <label>وقت عرض النتائج قبل الجولة التالية</label>
+    <input id="resultsTimer" type="number" min="0" max="300" value="45">
+    <button id="saveSettings">حفظ الإعدادات</button>
+    <p class="muted">القيمة 0 في وقت النتائج تعني عدم الانتقال التلقائي.</p>
+  </div>
+
+  <div class="adminCard">
+    <h2>🤖 إعدادات AI</h2>
+    <label class="switchLine">
+      <input id="aiEnabled" type="checkbox">
+      <span>تفعيل البوت الذكي AI</span>
+    </label>
+    <label>حد طلبات AI الشهري (0 = بدون حد)</label>
+    <input id="aiMonthlyLimit" type="number" min="0" max="1000000" value="0">
+    <div class="aiUsageBox">
+      <p><strong>حالة AI:</strong> <span id="aiStatus">—</span></p>
+      <p><strong>الشهر:</strong> <span id="aiUsageMonth">—</span></p>
+      <p><strong>عدد الطلبات:</strong> <span id="aiUsageRequests">0</span></p>
+      <p><strong>نجحت:</strong> <span id="aiUsageSuccesses">0</span> — <strong>فشلت:</strong> <span id="aiUsageFailures">0</span></p>
+      <p class="muted">هذا عداد استخدام داخلي تقريبي، وليس فاتورة OpenAI الرسمية.</p>
+    </div>
+    <button id="resetAiUsage" class="smallBtn">تصفير عداد AI</button>
   </div>
 </section>
 

@@ -1,8 +1,44 @@
 fetch('/api/admin/check').then(r=>r.json()).then(d=>{ if(!d.ok) location.href='/admin-login.html'; });
 const $ = id => document.getElementById(id);
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',2500); }
-async function loadSettings(){ const s=await fetch('/api/settings').then(r=>r.json()); $('selectTimer').value=45; $('voteTimer').value=45; }
-$('saveSettings').onclick=async()=>{ const body={selectTimer:45, voteTimer:45}; await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('تم حفظ المؤقتات'); };
+function setText(id, value){ const el=$(id); if(el) el.textContent=value; }
+function numVal(id, fallback){ const el=$(id); const n=Number(el?.value); return Number.isFinite(n) ? n : fallback; }
+async function loadSettings(){
+  const s=await fetch('/api/settings').then(r=>r.json());
+  if($('storyTimer')) $('storyTimer').value=s.storyTimer ?? s.selectTimer ?? 45;
+  if($('submitTimer')) $('submitTimer').value=s.submitTimer ?? s.selectTimer ?? 45;
+  if($('voteTimer')) $('voteTimer').value=s.voteTimer ?? 45;
+  if($('resultsTimer')) $('resultsTimer').value=s.resultsTimer ?? 45;
+  if($('aiEnabled')) $('aiEnabled').checked=!!s.aiEnabled;
+  if($('aiMonthlyLimit')) $('aiMonthlyLimit').value=s.aiMonthlyLimit ?? 0;
+  const usage=s.aiUsage || {};
+  setText('aiStatus', s.aiEnabled ? (s.hasOpenAiKey ? 'مفعّل' : 'مفعّل لكن مفتاح OPENAI_API_KEY غير موجود') : 'متوقف');
+  setText('aiUsageMonth', usage.month || '—');
+  setText('aiUsageRequests', usage.requests || 0);
+  setText('aiUsageSuccesses', usage.successes || 0);
+  setText('aiUsageFailures', usage.failures || 0);
+}
+$('saveSettings').onclick=async()=>{
+  const body={
+    storyTimer:numVal('storyTimer',45),
+    submitTimer:numVal('submitTimer',45),
+    voteTimer:numVal('voteTimer',45),
+    resultsTimer:numVal('resultsTimer',45),
+    aiEnabled:!!$('aiEnabled')?.checked,
+    aiMonthlyLimit:numVal('aiMonthlyLimit',0)
+  };
+  const res=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+  if(!res.ok) return toast(res.message || 'فشل حفظ الإعدادات');
+  toast('تم حفظ الإعدادات');
+  await loadSettings();
+};
+if($('resetAiUsage')) $('resetAiUsage').onclick=async()=>{
+  if(!confirm('تصفير عداد استخدام AI لهذا الشهر؟')) return;
+  const res=await fetch('/api/settings/ai-usage/reset',{method:'POST'}).then(r=>r.json()).catch(()=>({ok:false}));
+  if(!res.ok) return toast('فشل تصفير العداد');
+  toast('تم تصفير عداد AI');
+  await loadSettings();
+};
 
 async function loadCards(){
   const cards=await fetch('/api/cards').then(r=>r.json());
