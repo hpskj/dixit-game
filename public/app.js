@@ -187,10 +187,13 @@ function renderActions() {
   }
 
   if (state.phase === 'results') {
+    const tieMessage = state.tieBreakActive
+      ? `<div class="actionBox tieBreakBox"><b>🔥 تعادل على المركز الأول</b><p>ستبدأ جولة كسر التعادل حتى يظهر فائز منفرد.</p></div>`
+      : '';
     if (myId === state.hostId) {
-      actions.innerHTML = `<button onclick="socket.emit('nextRound', '${state.code}')">الجولة التالية</button>`;
+      actions.innerHTML = `${tieMessage}<button onclick="socket.emit('nextRound', '${state.code}')">${state.tieBreakActive ? 'بدء جولة كسر التعادل' : 'الجولة التالية'}</button>`;
     } else {
-      actions.innerHTML = `<p class="muted">بانتظار صاحب الغرفة يبدأ الجولة التالية...</p>`;
+      actions.innerHTML = `${tieMessage}<p class="muted">بانتظار صاحب الغرفة يبدأ الجولة التالية...</p>`;
     }
     return;
   }
@@ -238,6 +241,9 @@ function renderTable() {
   }
 
   if (['results', 'ended'].includes(state.phase)) {
+    const tieBreakNotice = state.tieBreakActive
+      ? `<div class="tieBreakNotice">🔥 تعادل على المركز الأول — الجولة القادمة ستكون لكسر التعادل</div>`
+      : '';
     const roundSummary = (state.roundGained || []).length
       ? `<div class="roundPointsSummary">
           <h3>نقاط هذه الجولة</h3>
@@ -248,6 +254,7 @@ function renderTable() {
       : '';
 
     table.innerHTML = `
+      ${tieBreakNotice}
       ${roundSummary}
       <div class="roundResultsList">
         ${cards.map((card, index) => {
