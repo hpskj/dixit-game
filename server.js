@@ -387,7 +387,7 @@ function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file
 function writeJson(file, data) { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); }
 function readCards() { return readJson(DATA_FILE, []); }
 function saveCards(cards) { writeJson(DATA_FILE, cards); }
-function readSettings() { return { selectTimer: 30, voteTimer: 45, ...readJson(SETTINGS_FILE, {}) }; }
+function readSettings() { return { ...readJson(SETTINGS_FILE, {}), selectTimer: 45, voteTimer: 45 }; }
 function saveSettings(settings) { writeJson(SETTINGS_FILE, settings); }
 function readRoomTemplates() { return readJson(ROOM_TEMPLATES_FILE, []); }
 function saveRoomTemplates(templates) { writeJson(ROOM_TEMPLATES_FILE, templates); }
@@ -502,32 +502,73 @@ function runBots(room) {
   }
 }
 
-// منع تكرار الكروت طول اللعبة كاملة
-function resetDeck(room, sourceCards) {
-  const used = new Set(room.usedCardIds || []);
-  let available = shuffle(sourceCards || room.deckCards || readCards()).filter(card => !used.has(card.id));
+// منع تكرار الصور داخل اليد أو بين اللاعبين أو على الطاولة
+function cardUniqueKey(card) {
+  return String(card?.image || card?.id || '').trim();
+}
 
-  // إذا خلصت كل الكروت، نبدأ دورة جديدة ونسمح بالتكرار من جديد
+function inPlayCardKeys(room) {
+  const keys = new Set();
+  Object.values(room.hands || {}).flat().forEach(card => {
+    const key = cardUniqueKey(card);
+    if (key) keys.add(key);
+  });
+  Object.values(room.submissions || {}).forEach(card => {
+    const key = cardUniqueKey(card);
+    if (key) keys.add(key);
+  });
+  (room.tableCards || []).forEach(card => {
+    const key = cardUniqueKey(card);
+    if (key) keys.add(key);
+  });
+  return keys;
+}
+
+function resetDeck(room, sourceCards) {
+  const source = sourceCards || room.deckCards || readCards();
+  const usedIds = new Set(room.usedCardIds || []);
+  const blockedKeys = inPlayCardKeys(room);
+  const seenKeys = new Set();
+
+  let available = shuffle(source).filter(card => {
+    const key = cardUniqueKey(card);
+    if (!key || seenKeys.has(key) || blockedKeys.has(key) || usedIds.has(card.id)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+
+  // إذا خلصت كل الصور غير المستخدمة، نبدأ دورة جديدة، لكن لا نكرر أي صورة موجودة حالياً في يد لاعب أو على الطاولة.
   if (!available.length) {
     room.usedCardIds = [];
-    available = shuffle(sourceCards || room.deckCards || readCards());
+    seenKeys.clear();
+    available = shuffle(source).filter(card => {
+      const key = cardUniqueKey(card);
+      if (!key || seenKeys.has(key) || blockedKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
   }
 
   room.deck = available;
 }
 
 function drawCard(room) {
-  if (!room.deck || room.deck.length === 0) {
+  const blockedKeys = inPlayCardKeys(room);
+  let attempts = 0;
+  while (attempts < 3) {
+    if (!room.deck || room.deck.length === 0) resetDeck(room, room.deckCards || readCards());
+    while (room.deck && room.deck.length) {
+      const card = room.deck.pop();
+      const key = cardUniqueKey(card);
+      if (!key || blockedKeys.has(key)) continue;
+      room.usedCardIds = room.usedCardIds || [];
+      if (card?.id) room.usedCardIds.push(card.id);
+      return card;
+    }
+    attempts += 1;
     resetDeck(room, room.deckCards || readCards());
   }
-
-  const card = room.deck.pop();
-  if (card) {
-    room.usedCardIds = room.usedCardIds || [];
-    room.usedCardIds.push(card.id);
-  }
-
-  return card;
+  return null;
 }
 
 const upload = multer({
@@ -1003,9 +1044,7 @@ app.delete('/api/cards/:id', requireAdmin, async (req, res) => {
 });
 app.get('/api/settings', (_, res) => res.json(readSettings()));
 app.post('/api/settings', requireAdmin, (req, res) => {
-  const selectTimer = Math.max(5, Math.min(300, Number(req.body.selectTimer) || 30));
-  const voteTimer = Math.max(5, Math.min(300, Number(req.body.voteTimer) || 20));
-  const settings = { selectTimer, voteTimer };
+  const settings = { selectTimer: 45, voteTimer: 45 };
   saveSettings(settings);
   res.json({ ok: true, settings });
 });
@@ -1068,7 +1107,10 @@ function emitRoom(code) {
     code, roomName: room.roomName || 'غرفة', roomCategory: room.roomCategory || '', phase: room.phase, round: room.round, targetScore: room.targetScore,
     hostId: room.hostId, storytellerId: room.storytellerId, hint: room.hint,
     players: room.players.map(publicPlayer),
-    tableCards: room.tableCards.map(c => {
+    tableCards: (showRoundDetails
+      ? [...(room.tableCards || [])].sort((a, b) => (a.ownerId === room.storytellerId ? -1 : b.ownerId === room.storytellerId ? 1 : 0))
+      : (room.tableCards || [])
+    ).map(c => {
       const owner = room.players.find(p => p.id === c.ownerId);
       const voters = Object.entries(room.votes || {})
         .filter(([pid, tableId]) => tableId === c.tableId && !room.skippedPlayers?.[pid])
@@ -1525,20 +1567,13 @@ io.on('connection', socket => {
     emitRoom(room.code); });
   socket.on('vote', ({ code, tableId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'voting') return;
     if (room.skippedPlayers?.[socket.id]) return;
-    // منع التصويت المتكرر حتى لا يعاد رسم الشاشة عند بقية اللاعبين مع كل ضغطة
-    if (room.votes && room.votes[socket.id]) return socket.emit('voteAccepted', { tableId: room.votes[socket.id], alreadyVoted: true });
     const card = room.tableCards.find(c => c.tableId === tableId);
-    if (!card || card.ownerId === socket.id) return socket.emit('errorMessage','لا يمكنك التصويت لكرتك');
+    if (!card) return;
+    if (card.ownerId === socket.id) return socket.emit('errorMessage', 'لا يمكنك اختيار كرتك');
     room.votes[socket.id] = tableId;
     const needed = room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.skippedPlayers?.[p.id]).length;
-    if (Object.keys(room.votes).length >= needed) {
-      scoreRound(room);
-      emitRoom(room.code);
-    } else {
-      // لا نرسل roomState للجميع هنا لأن التصويت لا يحتاج تحديث شاشة اللاعبين الآخرين
-      socket.emit('voteAccepted', { tableId });
-    }
-  });
+    if (Object.keys(room.votes).length >= needed) scoreRound(room);
+    emitRoom(room.code); });
   socket.on('nextRound', code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id || room.phase !== 'results') return; startRound(room); emitRoom(room.code); });
   socket.on('disconnect', () => { Object.values(rooms).forEach(room => { const p = room.players.find(x => x.id === socket.id); if (p) { p.connected = false; p.disconnectedAt = Date.now(); emitRoom(room.code); } }); });
 });
