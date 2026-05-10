@@ -398,6 +398,170 @@ function publicPlayer(p) { return { id: p.id, name: p.name, score: p.score, conn
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 
+// AI Vision bots (optional): يعمل فقط إذا كان OPENAI_API_KEY موجوداً.
+// إذا لم يكن المفتاح موجوداً أو فشل الطلب، يرجع البوت للنظام العادي بدون تعطيل اللعبة.
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+const AI_BOTS_ENABLED = process.env.AI_BOTS_ENABLED !== 'false';
+const AI_IMAGE_BASE_URL = (process.env.AI_IMAGE_BASE_URL || process.env.PUBLIC_BASE_URL || process.env.SITE_URL || process.env.APP_URL || '').replace(/\/$/, '');
+const AI_CACHE = new Map();
+
+function aiReady() {
+  return Boolean(AI_BOTS_ENABLED && OPENAI_API_KEY && typeof fetch === 'function');
+}
+
+function publicImageUrl(image) {
+  const raw = String(image || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (AI_IMAGE_BASE_URL && raw.startsWith('/')) return AI_IMAGE_BASE_URL + raw;
+  return '';
+}
+
+function extractResponseText(data) {
+  if (!data) return '';
+  if (typeof data.output_text === 'string') return data.output_text;
+  const parts = [];
+  const walk = value => {
+    if (!value) return;
+    if (typeof value === 'string') return;
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (typeof value === 'object') {
+      if (typeof value.text === 'string') parts.push(value.text);
+      if (typeof value.content === 'string') parts.push(value.content);
+      Object.values(value).forEach(walk);
+    }
+  };
+  walk(data.output || data);
+  return parts.join('\n').trim();
+}
+
+function parseJsonObject(text) {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch {}
+  const match = String(text).match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
+async function openAiJson(prompt, images = [], cacheKey = '') {
+  if (!aiReady()) return null;
+  if (cacheKey && AI_CACHE.has(cacheKey)) return AI_CACHE.get(cacheKey);
+
+  const content = [{ type: 'input_text', text: prompt + '\n\nأرجع JSON فقط بدون شرح.' }];
+  images.forEach((img, index) => {
+    const url = publicImageUrl(img.url || img.image);
+    if (!url) return;
+    content.push({ type: 'input_text', text: `الصورة رقم ${index + 1}${img.title ? ' - ' + img.title : ''}:` });
+    content.push({ type: 'input_image', image_url: url, detail: 'low' });
+  });
+  if (!content.some(x => x.type === 'input_image')) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const resp = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        input: [{ role: 'user', content }],
+        max_output_tokens: 350
+      }),
+      signal: controller.signal
+    });
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => '');
+      console.error('OpenAI bot error:', resp.status, err.slice(0, 200));
+      return null;
+    }
+    const data = await resp.json();
+    const json = parseJsonObject(extractResponseText(data));
+    if (json && cacheKey) AI_CACHE.set(cacheKey, json);
+    return json;
+  } catch (e) {
+    console.error('OpenAI bot request failed:', e.message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function botAiProbability(bot) {
+  const level = botSkillForPlayer(bot).level;
+  if (level === 'easy') return 0.35;
+  if (level === 'smart') return 0.95;
+  return 0.70;
+}
+
+function shouldUseAiForBot(bot) {
+  return aiReady() && Math.random() < botAiProbability(bot);
+}
+
+function normalizeAiIndex(value, length) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return -1;
+  const idx = Math.trunc(n) - 1;
+  return idx >= 0 && idx < length ? idx : -1;
+}
+
+async function chooseBotStoryMoveAI(room, botId) {
+  const hand = room.hands?.[botId] || [];
+  if (!hand.length) return null;
+  const bot = room.players.find(p => p.id === botId);
+  if (!shouldUseAiForBot(bot)) return null;
+
+  const images = hand.map(c => ({ image: c.image, title: c.title || '' }));
+  const prompt = `أنت لاعب في لعبة Dixit. اختر من الصور صورة تصلح أن تكون كرت الراوي، واكتب تلميحاً عربياً قصيراً وغامضاً.
+الشروط:
+- التلميح من 2 إلى 5 كلمات.
+- لا تصف الصورة مباشرة ولا تذكر اسم شيء واضح جداً.
+- لا تستخدم اسم الملف أو عنوان الصورة.
+- اجعل التلميح شاعرياً ومخادعاً لكن له علاقة بالصورة.
+أرجع JSON بهذا الشكل: {"index": رقم_الصورة, "hint": "التلميح"}`;
+  const json = await openAiJson(prompt, images, 'story:' + images.map(i => i.image).join('|'));
+  const idx = normalizeAiIndex(json?.index, hand.length);
+  const hint = String(json?.hint || '').trim().slice(0, 60);
+  if (idx < 0 || !hint) return null;
+  return { card: hand[idx], hint };
+}
+
+async function chooseBotSubmitCardAI(room, botId) {
+  const hand = room.hands?.[botId] || [];
+  if (!hand.length || !room.hint) return null;
+  const bot = room.players.find(p => p.id === botId);
+  if (!shouldUseAiForBot(bot)) return null;
+
+  const images = hand.map(c => ({ image: c.image, title: c.title || '' }));
+  const prompt = `أنت لاعب في Dixit. التلميح هو: "${String(room.hint).slice(0, 80)}".
+اختر من صور يدك صورة يمكن أن تخدع اللاعبين وتبدو مناسبة للتلميح، لكن لا تجعل الاختيار عشوائياً.
+لا تختَر بناءً على اسم الملف، بل على معنى الصورة.
+أرجع JSON بهذا الشكل فقط: {"index": رقم_الصورة}`;
+  const json = await openAiJson(prompt, images, 'submit:' + room.hint + ':' + images.map(i => i.image).join('|'));
+  const idx = normalizeAiIndex(json?.index, hand.length);
+  return idx >= 0 ? hand[idx] : null;
+}
+
+async function botVoteChoiceAI(room, botId) {
+  const options = (room.tableCards || []).filter(c => c.ownerId !== botId);
+  if (!options.length || !room.hint) return null;
+  const bot = room.players.find(p => p.id === botId);
+  if (!shouldUseAiForBot(bot)) return null;
+
+  const images = options.map(c => ({ image: c.image, title: c.title || '' }));
+  const prompt = `أنت لاعب في Dixit. التلميح هو: "${String(room.hint).slice(0, 80)}".
+اختر الصورة التي تعتقد أنها كرت الراوي الحقيقي. لا يمكنك اختيار كرتك أنت، والخيارات المعروضة لا تحتوي على كرتك.
+اختر بناءً على معنى الصورة وعلاقتها بالتلميح، وليس اسم الملف.
+أرجع JSON بهذا الشكل فقط: {"index": رقم_الصورة}`;
+  const json = await openAiJson(prompt, images, 'vote:' + room.hint + ':' + images.map(i => i.image).join('|'));
+  const idx = normalizeAiIndex(json?.index, options.length);
+  return idx >= 0 ? options[idx] : null;
+}
+
+
 
 const BOT_NAMES = ['بوت نورة', 'بوت سالم', 'بوت لولو', 'بوت بدر', 'بوت دانة', 'بوت فهد', 'بوت مريم', 'بوت راشد'];
 const BOT_HINTS = [
@@ -532,13 +696,14 @@ function runBots(room) {
   if (room.phase === 'story') {
     const storyteller = room.players.find(p => p.id === room.storytellerId);
     if (!isBotPlayer(storyteller)) return;
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!room || room.phase !== 'story' || room.storytellerId !== storyteller.id) return;
-      const chosen = chooseBotCard(room, storyteller.id, 'story');
+      const aiMove = await chooseBotStoryMoveAI(room, storyteller.id).catch(() => null);
+      const chosen = aiMove?.card || chooseBotCard(room, storyteller.id, 'story');
       if (!chosen) return autoStory(room);
       const card = removeFromHand(room, storyteller.id, chosen.id);
       if (!card) return;
-      room.hint = generateBotHint(card);
+      room.hint = aiMove?.hint || generateBotHint(card);
       room.storyCardId = card.id;
       room.submissions[storyteller.id] = card;
       room.phase = 'submit';
@@ -552,9 +717,10 @@ function runBots(room) {
   if (room.phase === 'submit') {
     const bots = room.players.filter(p => isBotPlayer(p) && p.id !== room.storytellerId && !room.submissions?.[p.id] && !room.skippedPlayers?.[p.id]);
     bots.forEach((bot, i) => {
-      setTimeout(() => {
+      setTimeout(async () => {
         if (!room || room.phase !== 'submit' || room.submissions?.[bot.id] || room.skippedPlayers?.[bot.id]) return;
-        const chosen = chooseBotCard(room, bot.id, 'submit');
+        const aiChosen = await chooseBotSubmitCardAI(room, bot.id).catch(() => null);
+        const chosen = aiChosen || chooseBotCard(room, bot.id, 'submit');
         if (!chosen) return;
         const card = removeFromHand(room, bot.id, chosen.id);
         if (!card) return;
@@ -570,9 +736,10 @@ function runBots(room) {
   if (room.phase === 'voting') {
     const bots = room.players.filter(p => isBotPlayer(p) && p.id !== room.storytellerId && !room.votes?.[p.id] && !room.skippedPlayers?.[p.id]);
     bots.forEach((bot, i) => {
-      setTimeout(() => {
+      setTimeout(async () => {
         if (!room || room.phase !== 'voting' || room.votes?.[bot.id] || room.skippedPlayers?.[bot.id]) return;
-        const choice = botVoteChoice(room, bot.id);
+        const aiChoice = await botVoteChoiceAI(room, bot.id).catch(() => null);
+        const choice = aiChoice || botVoteChoice(room, bot.id);
         if (!choice) return;
         room.votes[bot.id] = choice.tableId;
         maybeFinishVoting(room);
