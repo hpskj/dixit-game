@@ -1091,7 +1091,7 @@ function newRoom(hostId, name, member = null, template = null) {
     storytellerId: null, hint: '', hands: {}, storyCardId: null,
     submissions: {}, votes: {}, skippedPlayers: {}, tableCards: [], timerEndsAt: null, timerHandle: null,
     kickedMemberIds: [], kickedSocketIds: [],
-    settings: readSettings(), lastWinner: null, roundGained: {}, deck: [], usedCardIds: []
+    settings: readSettings(), lastWinner: null, roundGained: {}, deck: [], usedCardIds: [], tieBreakActive: false, tieBreakPlayers: []
   };
 }
 function clearTimer(room) { if (room.timerHandle) clearTimeout(room.timerHandle); room.timerHandle = null; room.timerEndsAt = null; }
@@ -1105,6 +1105,7 @@ function emitRoom(code) {
   const showRoundDetails = ['results', 'ended'].includes(room.phase);
   io.to(code).emit('roomState', {
     code, roomName: room.roomName || 'غرفة', roomCategory: room.roomCategory || '', phase: room.phase, round: room.round, targetScore: room.targetScore,
+    tieBreakActive: !!room.tieBreakActive, tieBreakPlayers: room.tieBreakPlayers || [],
     hostId: room.hostId, storytellerId: room.storytellerId, hint: room.hint,
     players: room.players.map(publicPlayer),
     tableCards: (showRoundDetails
@@ -1149,6 +1150,8 @@ function deal(room, sourceCards) {
 function startRound(room) {
   clearTimer(room);
   room.round += 1; room.phase = 'story'; room.hint = ''; room.storyCardId = null; room.submissions = {}; room.votes = {}; room.skippedPlayers = {}; room.tableCards = []; room.lastWinner = null; room.roundGained = {};
+  // إذا كانت هناك حالة تعادل، تبقى مفعلة حتى يظهر فائز منفرد
+  if (!room.tieBreakActive) room.tieBreakPlayers = [];
   room.storytellerIndex = (room.storytellerIndex + 1) % room.players.length;
   room.storytellerId = room.players[room.storytellerIndex].id;
   if (!Object.keys(room.hands).length) deal(room, room.deckCards);
@@ -1285,24 +1288,42 @@ function scoreRound(room) {
   room.players.forEach(p => refillHand(room, p.id));
 
   room.phase = 'results';
-  const winners = room.players.filter(p => p.score >= room.targetScore).sort((a, b) => b.score - a.score);
 
-  if (winners.length) {
-    room.phase = 'ended';
-    room.lastWinner = { name: winners[0].name, score: winners[0].score };
+  // نظام كسر التعادل:
+  // إذا وصل أكثر من لاعب إلى أعلى نتيجة بعد تجاوز/بلوغ الهدف، لا تنتهي اللعبة.
+  // تبدأ جولة إضافية حتى يصبح هناك فائز واحد فقط بالمركز الأول.
+  const sortedPlayers = [...room.players].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const topScore = sortedPlayers[0]?.score || 0;
+  const topPlayers = sortedPlayers.filter(p => (p.score || 0) === topScore);
 
-    // حفظ الفوز وعدد الألعاب للأعضاء المسجلين
-    room.players.forEach(p => {
-      if (p.memberId) {
-        updateMemberStats(p.memberId, {
-          win: p.id === winners[0].id,
-          gamePlayed: true
-        });
-      }
-    });
+  if (topScore >= room.targetScore) {
+    if (topPlayers.length === 1) {
+      const winner = topPlayers[0];
+      room.tieBreakActive = false;
+      room.tieBreakPlayers = [];
+      room.phase = 'ended';
+      room.lastWinner = { name: winner.name, score: winner.score };
 
-    saveMatchHistory(room);
-    io.to(room.code).emit('gameWinner', room.lastWinner);
+      // حفظ الفوز وعدد الألعاب للأعضاء المسجلين
+      room.players.forEach(p => {
+        if (p.memberId) {
+          updateMemberStats(p.memberId, {
+            win: p.id === winner.id,
+            gamePlayed: true
+          });
+        }
+      });
+
+      saveMatchHistory(room);
+      io.to(room.code).emit('gameWinner', room.lastWinner);
+    } else {
+      room.tieBreakActive = true;
+      room.tieBreakPlayers = topPlayers.map(p => ({ id: p.id, name: p.name, score: p.score }));
+      io.to(room.code).emit('tieBreak', {
+        message: 'تعادل على المركز الأول! ستبدأ جولة كسر التعادل.',
+        players: room.tieBreakPlayers
+      });
+    }
   }
 }
 
