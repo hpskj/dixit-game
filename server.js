@@ -505,7 +505,7 @@ async function openAiJson(prompt, images = [], cacheKey = '') {
   images.forEach((img, index) => {
     const url = publicImageUrl(img.url || img.image);
     if (!url) return;
-    content.push({ type: 'input_text', text: `الصورة رقم ${index + 1}${img.title ? ' - ' + img.title : ''}:` });
+    content.push({ type: 'input_text', text: `الصورة رقم ${index + 1}:` });
     content.push({ type: 'input_image', image_url: url, detail: 'low' });
   });
   if (!content.some(x => x.type === 'input_image')) return null;
@@ -564,23 +564,49 @@ function normalizeAiIndex(value, length) {
   return idx >= 0 && idx < length ? idx : -1;
 }
 
+function sanitizeAiHint(value) {
+  let hint = String(value || '')
+    .replace(/["'`{}[\]<>]/g, '')
+    .replace(/[
+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // منع التلميحات الإنجليزية أو الرموز الغريبة أو أسماء الملفات
+  if (!hint) return '';
+  if (/[A-Za-z0-9_\/\.]/.test(hint)) return '';
+  const arabicChars = (hint.match(/[؀-ۿ]/g) || []).length;
+  if (arabicChars < 4) return '';
+  const words = hint.split(' ').filter(Boolean);
+  if (words.length < 2 || words.length > 5) return '';
+  if (hint.length > 45) return '';
+  const bad = ['غير مفهوم','لا أعرف','لا يمكن','الصورة','الكرت','ملف','عنوان','رقم'];
+  if (bad.some(x => hint.includes(x))) return '';
+  return hint;
+}
+
 async function chooseBotStoryMoveAI(room, botId) {
   const hand = room.hands?.[botId] || [];
   if (!hand.length) return null;
   const bot = room.players.find(p => p.id === botId);
   if (!shouldUseAiForBot(bot)) return null;
 
-  const images = hand.map(c => ({ image: c.image, title: c.title || '' }));
-  const prompt = `أنت لاعب في لعبة Dixit. اختر من الصور صورة تصلح أن تكون كرت الراوي، واكتب تلميحاً عربياً قصيراً وغامضاً.
-الشروط:
-- التلميح من 2 إلى 5 كلمات.
-- لا تصف الصورة مباشرة ولا تذكر اسم شيء واضح جداً.
-- لا تستخدم اسم الملف أو عنوان الصورة.
-- اجعل التلميح شاعرياً ومخادعاً لكن له علاقة بالصورة.
-أرجع JSON بهذا الشكل: {"index": رقم_الصورة, "hint": "التلميح"}`;
+  const images = hand.map(c => ({ image: c.image }));
+  const prompt = `أنت لاعب ذكي في لعبة Dixit.
+المطلوب: اختر صورة واحدة لتكون كرت الراوي، واكتب تلميحاً عربياً واضحاً وجميلاً ومناسباً للعبة.
+
+قواعد التلميح الصارمة:
+- عربي فقط، بدون إنجليزي، بدون أرقام، بدون رموز، بدون إيموجي.
+- من كلمتين إلى خمس كلمات فقط.
+- لا تكتب جملة طويلة.
+- لا تصف الصورة حرفياً. لا تقل مثلاً: رجل، قمر، شجرة، سمكة إذا كانت واضحة بالصورة.
+- لا تستخدم اسم ملف أو عنوان صورة.
+- اجعل التلميح له معنى مفهوم وغامض قليلاً، مثل: "طريق بلا عودة" أو "سر تحت الضوء" أو "وعد قديم".
+- ممنوع التلميحات غير المفهومة أو المكسّرة.
+
+أرجع JSON فقط بهذا الشكل: {"index": رقم_الصورة, "hint": "تلميح عربي مفهوم"}`;
   const json = await openAiJson(prompt, images, 'story:' + images.map(i => i.image).join('|'));
   const idx = normalizeAiIndex(json?.index, hand.length);
-  const hint = String(json?.hint || '').trim().slice(0, 60);
+  const hint = sanitizeAiHint(json?.hint);
   if (idx < 0 || !hint) return null;
   return { card: hand[idx], hint };
 }
@@ -591,11 +617,12 @@ async function chooseBotSubmitCardAI(room, botId) {
   const bot = room.players.find(p => p.id === botId);
   if (!shouldUseAiForBot(bot)) return null;
 
-  const images = hand.map(c => ({ image: c.image, title: c.title || '' }));
+  const images = hand.map(c => ({ image: c.image }));
   const prompt = `أنت لاعب في Dixit. التلميح هو: "${String(room.hint).slice(0, 80)}".
-اختر من صور يدك صورة يمكن أن تخدع اللاعبين وتبدو مناسبة للتلميح، لكن لا تجعل الاختيار عشوائياً.
-لا تختَر بناءً على اسم الملف، بل على معنى الصورة.
-أرجع JSON بهذا الشكل فقط: {"index": رقم_الصورة}`;
+اختر الصورة الأقرب لمعنى التلميح، بحيث تخدع اللاعبين لكنها لا تكون اختياراً عشوائياً.
+اعتمد فقط على محتوى الصورة ومعناها البصري، ولا تستخدم اسم الملف أو العنوان.
+إذا تساوت الصور، اختر الأكثر شاعرية وغموضاً.
+أرجع JSON فقط بهذا الشكل: {"index": رقم_الصورة}`;
   const json = await openAiJson(prompt, images, 'submit:' + room.hint + ':' + images.map(i => i.image).join('|'));
   const idx = normalizeAiIndex(json?.index, hand.length);
   return idx >= 0 ? hand[idx] : null;
@@ -607,11 +634,12 @@ async function botVoteChoiceAI(room, botId) {
   const bot = room.players.find(p => p.id === botId);
   if (!shouldUseAiForBot(bot)) return null;
 
-  const images = options.map(c => ({ image: c.image, title: c.title || '' }));
+  const images = options.map(c => ({ image: c.image }));
   const prompt = `أنت لاعب في Dixit. التلميح هو: "${String(room.hint).slice(0, 80)}".
-اختر الصورة التي تعتقد أنها كرت الراوي الحقيقي. لا يمكنك اختيار كرتك أنت، والخيارات المعروضة لا تحتوي على كرتك.
-اختر بناءً على معنى الصورة وعلاقتها بالتلميح، وليس اسم الملف.
-أرجع JSON بهذا الشكل فقط: {"index": رقم_الصورة}`;
+اختر الصورة التي غالباً تكون كرت الراوي الحقيقي.
+اعتمد على علاقة المعنى بين التلميح والصورة، وليس اسم الملف أو العنوان.
+لا تختَر عشوائياً. إذا كانت أكثر من صورة مناسبة، اختر الأكثر ارتباطاً بالتلميح نفسياً أو رمزياً.
+أرجع JSON فقط بهذا الشكل: {"index": رقم_الصورة}`;
   const json = await openAiJson(prompt, images, 'vote:' + room.hint + ':' + images.map(i => i.image).join('|'));
   const idx = normalizeAiIndex(json?.index, options.length);
   return idx >= 0 ? options[idx] : null;
