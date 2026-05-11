@@ -724,11 +724,36 @@ function sanitizeArabicHint(raw) {
   return words.join(' ');
 }
 
-function safeBotHintFallback(card) {
-  const hint = sanitizeArabicHint(generateBotHint(card));
-  if (hint) return hint;
-  const fallback = randomFrom(BOT_HINTS.map(sanitizeArabicHint).filter(Boolean));
-  return fallback || 'حلم قديم';
+function botHintKey(hint) {
+  return sanitizeArabicHint(hint).replace(/\s+/g, ' ').trim();
+}
+
+function isBotHintUsed(room, hint) {
+  const key = botHintKey(hint);
+  if (!key) return true;
+  const used = new Set((room?.usedBotHints || []).map(botHintKey).filter(Boolean));
+  return used.has(key);
+}
+
+function rememberBotHint(room, hint) {
+  const key = botHintKey(hint);
+  if (!key || !room) return;
+  room.usedBotHints = room.usedBotHints || [];
+  if (!room.usedBotHints.map(botHintKey).includes(key)) room.usedBotHints.push(key);
+}
+
+function safeBotHintFallback(card, room = null) {
+  const pool = [...BOT_HINTS, ...BOT_STYLE_HINTS]
+    .map(sanitizeArabicHint)
+    .filter(Boolean)
+    .filter(h => !room || !isBotHintUsed(room, h));
+  const picked = randomFrom(pool);
+  if (picked) return picked;
+
+  const emergency = ['حلم قديم', 'سر صغير', 'رحلة غريبة', 'ظل طويل', 'أمل بعيد', 'صوت الصمت']
+    .map(sanitizeArabicHint)
+    .find(h => h && (!room || !isBotHintUsed(room, h)));
+  return emergency || 'حلم قديم';
 }
 
 async function chooseBotStoryMoveAI(room, botId) {
@@ -746,11 +771,12 @@ async function chooseBotStoryMoveAI(room, botId) {
 - ممنوع الإنجليزي والأرقام والرموز والإيموجي وعلامات الترقيم.
 - لا تستخدم اسم الملف أو عنوان الصورة أو أي نص ظاهر بجانب الصورة.
 - لا تصف الصورة مباشرة؛ اجعله غامضاً ومخادعاً وله علاقة بالمعنى العام.
+التلميحات المستخدمة سابقاً في هذه المباراة ممنوع تكرارها: ${(room.usedBotHints || []).join('، ') || 'لا يوجد'}.
 أرجع JSON فقط بهذا الشكل: {"index": رقم_الصورة, "hint": "التلميح"}`;
   const json = await openAiJson(prompt, images, 'story:' + images.map(i => i.image).join('|'));
   const idx = normalizeAiIndex(json?.index, hand.length);
   const hint = sanitizeArabicHint(json?.hint);
-  if (idx < 0 || !hint) return null;
+  if (idx < 0 || !hint || isBotHintUsed(room, hint)) return null;
   return { card: hand[idx], hint };
 }
 
@@ -864,13 +890,14 @@ function makeBotPlayer(room) {
     username: null
   };
 }
-function generateBotHint(card) {
+function generateBotHint(card, room = null) {
   // البوت العادي لا يستخدم اسم الصورة أو اسم الملف نهائياً حتى لا تظهر تلميحات غريبة.
-  // كل التلميحات عربية فقط، بدون رموز، ومن 2 إلى 5 كلمات.
+  // كل التلميحات عربية فقط، بدون رموز، ومن 2 إلى 5 كلمات، ولا تتكرر داخل نفس المباراة.
   const pool = [...BOT_HINTS, ...BOT_STYLE_HINTS]
     .map(sanitizeArabicHint)
-    .filter(Boolean);
-  return randomFrom(pool) || 'حلم قديم';
+    .filter(Boolean)
+    .filter(h => !room || !isBotHintUsed(room, h));
+  return randomFrom(pool) || safeBotHintFallback(card, room);
 }
 function chooseBotCard(room, botId, purpose = 'submit') {
   const hand = room.hands?.[botId] || [];
@@ -931,7 +958,8 @@ function runBots(room) {
       if (!chosen) return autoStory(room);
       const card = removeFromHand(room, storyteller.id, chosen.id);
       if (!card) return;
-      room.hint = aiMove?.hint || safeBotHintFallback(card);
+      room.hint = aiMove?.hint || safeBotHintFallback(card, room);
+      rememberBotHint(room, room.hint);
       room.storyCardId = card.id;
       room.submissions[storyteller.id] = card;
       room.phase = 'submit';
@@ -953,8 +981,9 @@ function runBots(room) {
         const card = removeFromHand(room, bot.id, chosen.id);
         if (!card) return;
         room.submissions[bot.id] = card;
+        const previousPhase = room.phase;
         maybeFinishSubmit(room);
-        emitRoom(room.code);
+        if (room.phase !== previousPhase) emitRoom(room.code);
         if (room.phase === 'voting') runBots(room);
       }, 900 + i * 700 + Math.floor(Math.random() * 700));
     });
@@ -970,8 +999,9 @@ function runBots(room) {
         const choice = aiChoice || botVoteChoice(room, bot.id);
         if (!choice) return;
         room.votes[bot.id] = choice.tableId;
+        const previousPhase = room.phase;
         maybeFinishVoting(room);
-        emitRoom(room.code);
+        if (room.phase !== previousPhase || room.phase === 'results' || room.phase === 'ended') emitRoom(room.code);
       }, 1000 + i * 800 + Math.floor(Math.random() * 900));
     });
   }
@@ -1596,7 +1626,7 @@ function newRoom(hostId, name, member = null, template = null) {
     storytellerId: null, hint: '', hands: {}, storyCardId: null,
     submissions: {}, votes: {}, skippedPlayers: {}, tableCards: [], timerEndsAt: null, timerHandle: null,
     kickedMemberIds: [], kickedSocketIds: [],
-    settings: readSettings(), lastWinner: null, roundGained: {}, deck: [], usedCardIds: [], tieBreakActive: false, tieBreakPlayers: []
+    settings: readSettings(), lastWinner: null, roundGained: {}, deck: [], usedCardIds: [], usedBotHints: [], tieBreakActive: false, tieBreakPlayers: []
   };
 }
 function clearTimer(room) { if (room.timerHandle) clearTimeout(room.timerHandle); room.timerHandle = null; room.timerEndsAt = null; }
@@ -1697,7 +1727,8 @@ function autoStory(room) {
   const hand = room.hands[room.storytellerId] || [];
   if (!hand.length) return;
   const card = removeFromHand(room, room.storytellerId, hand[0].id);
-  room.hint = 'تلميح تلقائي';
+  room.hint = safeBotHintFallback(card, room);
+  rememberBotHint(room, room.hint);
   room.storyCardId = card.id;
   room.submissions[room.storytellerId] = card;
   room.phase = 'submit';
@@ -2097,18 +2128,28 @@ io.on('connection', socket => {
     const card = removeFromHand(room, socket.id, cardId);
     if (!card) return;
     room.submissions[socket.id] = card;
+    socket.emit('choiceAccepted', { type: 'submit', cardId });
+    socket.emit('yourHand', room.hands[socket.id] || []);
     const needed = room.players.filter(p => p.connected && !room.skippedPlayers?.[p.id]).length;
-    if (Object.keys(room.submissions).length >= needed) prepareVoting(room);
-    emitRoom(room.code); });
+    if (Object.keys(room.submissions).length >= needed) {
+      prepareVoting(room);
+      emitRoom(room.code);
+    }
+  });
   socket.on('vote', ({ code, tableId }) => { const room = rooms[(code||'').toUpperCase()]; if (!room || socket.id === room.storytellerId || room.phase !== 'voting') return;
     if (room.skippedPlayers?.[socket.id]) return;
     const card = room.tableCards.find(c => c.tableId === tableId);
     if (!card) return;
     if (card.ownerId === socket.id) return socket.emit('errorMessage', 'لا يمكنك اختيار كرتك');
+    if (room.votes?.[socket.id]) return socket.emit('choiceAccepted', { type: 'vote', tableId: room.votes[socket.id] });
     room.votes[socket.id] = tableId;
+    socket.emit('choiceAccepted', { type: 'vote', tableId });
     const needed = room.players.filter(p => p.connected && p.id !== room.storytellerId && !room.skippedPlayers?.[p.id]).length;
-    if (Object.keys(room.votes).length >= needed) scoreRound(room);
-    emitRoom(room.code); });
+    if (Object.keys(room.votes).length >= needed) {
+      scoreRound(room);
+      emitRoom(room.code);
+    }
+  });
   socket.on('nextRound', code => { const room = rooms[(code||'').toUpperCase()]; if (!room || room.hostId !== socket.id || room.phase !== 'results') return; startRound(room); emitRoom(room.code); });
   socket.on('disconnect', () => { Object.values(rooms).forEach(room => { const p = room.players.find(x => x.id === socket.id); if (p) { p.connected = false; p.disconnectedAt = Date.now(); emitRoom(room.code); } }); });
 });
