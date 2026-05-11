@@ -190,15 +190,20 @@ async function saveMatchHistory(room) {
 app.post('/api/auth/register', async (req, res) => {
   try {
     const username = String(req.body.username || '').trim().toLowerCase();
+    const email = String(req.body.email || '').trim().toLowerCase();
     const password = String(req.body.password || '');
     const displayName = String(req.body.display_name || username).trim();
 
-    if (!username || !password) {
-      return res.status(400).json({ ok: false, message: 'اكتب اسم المستخدم وكلمة المرور' });
+    if (!username || !email || !password) {
+      return res.status(400).json({ ok: false, message: 'اكتب اسم المستخدم والإيميل وكلمة المرور' });
     }
 
-    if (username.length < 3) {
-      return res.status(400).json({ ok: false, message: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل' });
+    if (username.length < 3 || !/^[a-z0-9_\.]{3,24}$/.test(username)) {
+      return res.status(400).json({ ok: false, message: 'اسم المستخدم يجب أن يكون 3-24 حرفاً إنجليزياً أو أرقام أو _' });
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ ok: false, message: 'الإيميل غير صحيح' });
     }
 
     if (password.length < 6) {
@@ -211,21 +216,23 @@ app.post('/api/auth/register', async (req, res) => {
       .from('members')
       .insert([{
         username,
+        email,
         password_hash: passwordHash,
-        display_name: displayName
+        display_name: displayName,
+        status: 'active'
       }])
-      .select('id, username, display_name, score, wins, games_played, avatar_url, created_at')
+      .select('id, username, email, display_name, score, wins, games_played, avatar_url, status, created_at')
       .single();
 
     if (error) {
       const message = error.code === '23505'
-        ? 'اسم المستخدم موجود مسبقاً'
+        ? 'اسم المستخدم أو الإيميل موجود مسبقاً'
         : error.message;
       return res.status(400).json({ ok: false, message });
     }
 
     const token = jwt.sign(
-      { id: data.id, username: data.username, displayName: data.display_name },
+      { id: data.id, username: data.username, email: data.email, displayName: data.display_name },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -240,30 +247,36 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const username = String(req.body.username || '').trim().toLowerCase();
+    const login = String(req.body.username || req.body.login || '').trim().toLowerCase();
     const password = String(req.body.password || '');
 
-    if (!username || !password) {
-      return res.status(400).json({ ok: false, message: 'اكتب اسم المستخدم وكلمة المرور' });
+    if (!login || !password) {
+      return res.status(400).json({ ok: false, message: 'اكتب اسم المستخدم/الإيميل وكلمة المرور' });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('members')
-      .select('id, username, password_hash, display_name, score, wins, games_played, avatar_url, created_at')
-      .eq('username', username)
+      .select('id, username, email, password_hash, display_name, score, wins, games_played, avatar_url, status, created_at')
+      .eq(login.includes('@') ? 'email' : 'username', login)
       .single();
 
+    let { data, error } = await query;
+
     if (error || !data) {
-      return res.status(401).json({ ok: false, message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+      return res.status(401).json({ ok: false, message: 'بيانات الدخول غير صحيحة' });
+    }
+
+    if ((data.status || 'active') === 'banned') {
+      return res.status(403).json({ ok: false, message: 'تم إيقاف هذا الحساب من لوحة التحكم' });
     }
 
     const match = await bcrypt.compare(password, data.password_hash);
     if (!match) {
-      return res.status(401).json({ ok: false, message: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+      return res.status(401).json({ ok: false, message: 'بيانات الدخول غير صحيحة' });
     }
 
     const token = jwt.sign(
-      { id: data.id, username: data.username, displayName: data.display_name },
+      { id: data.id, username: data.username, email: data.email, displayName: data.display_name },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -275,11 +288,13 @@ app.post('/api/auth/login', async (req, res) => {
       user: {
         id: data.id,
         username: data.username,
+        email: data.email || null,
         display_name: data.display_name,
         score: data.score,
         wins: data.wins || 0,
         games_played: data.games_played || 0,
         avatar_url: data.avatar_url || null,
+        status: data.status || 'active',
         created_at: data.created_at
       },
       token
@@ -302,7 +317,7 @@ app.get('/api/auth/me', async (req, res) => {
 
     const { data, error } = await supabase
       .from('members')
-      .select('id, username, display_name, score, wins, games_played, avatar_url, created_at')
+      .select('id, username, email, display_name, score, wins, games_played, avatar_url, status, created_at')
       .eq('id', member.id)
       .single();
 
@@ -379,6 +394,134 @@ app.get('/api/leaderboard', async (_, res) => {
 app.get('/invite/:code', (req, res) => {
   const code = String(req.params.code || '').toUpperCase();
   res.redirect('/?room=' + encodeURIComponent(code));
+});
+
+
+// ================= إدارة اللاعبين من لوحة التحكم =================
+function cleanUsername(value) {
+  return String(value || '').trim().toLowerCase();
+}
+function cleanEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+function publicMemberRow(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email || '',
+    display_name: row.display_name || row.username,
+    score: Number(row.score || 0),
+    wins: Number(row.wins || 0),
+    games_played: Number(row.games_played || 0),
+    avatar_url: row.avatar_url || '',
+    status: row.status || 'active',
+    created_at: row.created_at
+  };
+}
+
+app.get('/api/admin/members', requireAdmin, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    let query = supabase
+      .from('members')
+      .select('id, username, email, display_name, score, wins, games_played, avatar_url, status, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (q) {
+      query = query.or(`username.ilike.%${q}%,display_name.ilike.%${q}%,email.ilike.%${q}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+    res.json({ ok: true, members: (data || []).map(publicMemberRow) });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+app.post('/api/admin/members', requireAdmin, async (req, res) => {
+  try {
+    const username = cleanUsername(req.body.username);
+    const email = cleanEmail(req.body.email);
+    const password = String(req.body.password || '');
+    const display_name = String(req.body.display_name || username).trim();
+
+    if (!username || !email || !password) return res.status(400).json({ ok: false, message: 'اكتب اليوزر والإيميل والباسوورد' });
+    if (!/^[a-z0-9_\.]{3,24}$/.test(username)) return res.status(400).json({ ok: false, message: 'اليوزر غير صحيح' });
+    if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ ok: false, message: 'الإيميل غير صحيح' });
+    if (password.length < 6) return res.status(400).json({ ok: false, message: 'الباسوورد 6 أحرف على الأقل' });
+
+    const password_hash = await bcrypt.hash(password, 10);
+    const { data, error } = await supabase
+      .from('members')
+      .insert([{ username, email, password_hash, display_name, status: 'active' }])
+      .select('id, username, email, display_name, score, wins, games_played, avatar_url, status, created_at')
+      .single();
+
+    if (error) return res.status(400).json({ ok: false, message: error.code === '23505' ? 'اليوزر أو الإيميل مستخدم مسبقاً' : error.message });
+    res.json({ ok: true, member: publicMemberRow(data) });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+app.put('/api/admin/members/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updates = {};
+    if ('username' in req.body) {
+      const username = cleanUsername(req.body.username);
+      if (!/^[a-z0-9_\.]{3,24}$/.test(username)) return res.status(400).json({ ok: false, message: 'اليوزر غير صحيح' });
+      updates.username = username;
+    }
+    if ('email' in req.body) {
+      const email = cleanEmail(req.body.email);
+      if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ ok: false, message: 'الإيميل غير صحيح' });
+      updates.email = email;
+    }
+    if ('display_name' in req.body) updates.display_name = String(req.body.display_name || '').trim();
+    if ('avatar_url' in req.body) updates.avatar_url = String(req.body.avatar_url || '').trim();
+    if ('score' in req.body) updates.score = Math.max(0, Number(req.body.score || 0) || 0);
+    if ('wins' in req.body) updates.wins = Math.max(0, Number(req.body.wins || 0) || 0);
+    if ('games_played' in req.body) updates.games_played = Math.max(0, Number(req.body.games_played || 0) || 0);
+    if ('status' in req.body) updates.status = req.body.status === 'banned' ? 'banned' : 'active';
+
+    const { data, error } = await supabase
+      .from('members')
+      .update(updates)
+      .eq('id', id)
+      .select('id, username, email, display_name, score, wins, games_played, avatar_url, status, created_at')
+      .single();
+
+    if (error) return res.status(400).json({ ok: false, message: error.code === '23505' ? 'اليوزر أو الإيميل مستخدم مسبقاً' : error.message });
+    res.json({ ok: true, member: publicMemberRow(data) });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+app.post('/api/admin/members/:id/password', requireAdmin, async (req, res) => {
+  try {
+    const password = String(req.body.password || '');
+    if (password.length < 6) return res.status(400).json({ ok: false, message: 'الباسوورد 6 أحرف على الأقل' });
+    const password_hash = await bcrypt.hash(password, 10);
+    const { error } = await supabase.from('members').update({ password_hash }).eq('id', req.params.id);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+app.delete('/api/admin/members/:id', requireAdmin, async (req, res) => {
+  try {
+    const { error } = await supabase.from('members').delete().eq('id', req.params.id);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
