@@ -545,7 +545,9 @@ const DEFAULT_SETTINGS = {
     requests: 0,
     successes: 0,
     failures: 0
-  }
+  },
+  whatsappNumber: '',
+  botGlobalHints: []
 };
 function normalizeSettings(raw = {}) {
   const merged = { ...DEFAULT_SETTINGS, ...raw };
@@ -566,6 +568,10 @@ function normalizeSettings(raw = {}) {
   if (merged.aiUsage.month !== currentAiMonth()) {
     merged.aiUsage = { month: currentAiMonth(), requests: 0, successes: 0, failures: 0 };
   }
+  merged.whatsappNumber = String(merged.whatsappNumber || '').trim();
+  merged.botGlobalHints = Array.isArray(merged.botGlobalHints)
+    ? [...new Set(merged.botGlobalHints.map(botHintKey).filter(Boolean))].slice(-500)
+    : [];
   return merged;
 }
 function readSettings() { return normalizeSettings(readJson(SETTINGS_FILE, {})); }
@@ -581,6 +587,18 @@ function recordAiUsage(status = 'success') {
 function aiUsageSummary() {
   const settings = readSettings();
   return settings.aiUsage;
+}
+function globalBotHintSet() {
+  return new Set((readSettings().botGlobalHints || []).map(botHintKey).filter(Boolean));
+}
+function rememberGlobalBotHint(hint) {
+  const key = botHintKey(hint);
+  if (!key) return;
+  const settings = readSettings();
+  const list = Array.isArray(settings.botGlobalHints) ? settings.botGlobalHints.map(botHintKey).filter(Boolean) : [];
+  if (!list.includes(key)) list.push(key);
+  settings.botGlobalHints = list.slice(-500);
+  saveSettings(settings);
 }
 function readRoomTemplates() { return readJson(ROOM_TEMPLATES_FILE, []); }
 function saveRoomTemplates(templates) { writeJson(ROOM_TEMPLATES_FILE, templates); }
@@ -732,7 +750,8 @@ function isBotHintUsed(room, hint) {
   const key = botHintKey(hint);
   if (!key) return true;
   const used = new Set((room?.usedBotHints || []).map(botHintKey).filter(Boolean));
-  return used.has(key);
+  if (used.has(key)) return true;
+  return globalBotHintSet().has(key);
 }
 
 function rememberBotHint(room, hint) {
@@ -740,6 +759,7 @@ function rememberBotHint(room, hint) {
   if (!key || !room) return;
   room.usedBotHints = room.usedBotHints || [];
   if (!room.usedBotHints.map(botHintKey).includes(key)) room.usedBotHints.push(key);
+  rememberGlobalBotHint(key);
 }
 
 function safeBotHintFallback(card, room = null) {
@@ -772,6 +792,7 @@ async function chooseBotStoryMoveAI(room, botId) {
 - لا تستخدم اسم الملف أو عنوان الصورة أو أي نص ظاهر بجانب الصورة.
 - لا تصف الصورة مباشرة؛ اجعله غامضاً ومخادعاً وله علاقة بالمعنى العام.
 التلميحات المستخدمة سابقاً في هذه المباراة ممنوع تكرارها: ${(room.usedBotHints || []).join('، ') || 'لا يوجد'}.
+التلميحات المحفوظة عالمياً لا تكررها إذا أمكن: ${Array.from(globalBotHintSet()).slice(-80).join('، ') || 'لا يوجد'}.
 أرجع JSON فقط بهذا الشكل: {"index": رقم_الصورة, "hint": "التلميح"}`;
   const json = await openAiJson(prompt, images, 'story:' + images.map(i => i.image).join('|'));
   const idx = normalizeAiIndex(json?.index, hand.length);
@@ -1547,6 +1568,53 @@ app.delete('/api/cards/:id', requireAdmin, async (req, res) => {
     res.json({ ok: true, deleted: result.deleted, updatedRooms: result.updatedRooms });
   } catch(e) { res.status(500).json({ ok:false, message:'فشل الحذف: ' + e.message }); }
 });
+
+// ================= تواصل معنا =================
+function cleanContactText(value, max = 1000) {
+  return String(value || '').replace(/<[^>]*>/g, '').trim().slice(0, max);
+}
+app.get('/api/contact-info', (_, res) => {
+  const settings = readSettings();
+  res.json({ ok: true, whatsappNumber: settings.whatsappNumber || '' });
+});
+app.post('/api/contact', async (req, res) => {
+  try {
+    const name = cleanContactText(req.body.name, 80);
+    const email = cleanContactText(req.body.email, 120).toLowerCase();
+    const message = cleanContactText(req.body.message, 1500);
+    const member = getMemberFromRequest(req);
+    if (!name || !email || !message) return res.status(400).json({ ok: false, message: 'اكتب الاسم والإيميل والرسالة' });
+    if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ ok: false, message: 'الإيميل غير صحيح' });
+    const { error } = await supabase.from('contact_messages').insert([{ name, email, message, member_id: member?.id || null, status: 'new' }]);
+    if (error) return res.status(400).json({ ok: false, message: 'تعذر إرسال الرسالة. تأكد من تشغيل ملف SQL الخاص بالتواصل.' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+app.get('/api/admin/contact-messages', requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    let query = supabase.from('contact_messages').select('*').order('created_at', { ascending: false }).limit(200);
+    if (status) query = query.eq('status', status);
+    const { data, error } = await query;
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+    res.json({ ok: true, messages: data || [] });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+app.post('/api/admin/contact-messages/:id/read', requireAdmin, async (req, res) => {
+  const { error } = await supabase.from('contact_messages').update({ status: 'read' }).eq('id', req.params.id);
+  if (error) return res.status(400).json({ ok: false, message: error.message });
+  res.json({ ok: true });
+});
+app.delete('/api/admin/contact-messages/:id', requireAdmin, async (req, res) => {
+  const { error } = await supabase.from('contact_messages').delete().eq('id', req.params.id);
+  if (error) return res.status(400).json({ ok: false, message: error.message });
+  res.json({ ok: true });
+});
+
 app.get('/api/settings', (_, res) => {
   const settings = readSettings();
   res.json({
@@ -1568,7 +1636,9 @@ app.post('/api/settings', requireAdmin, (req, res) => {
     resultsTimer: incoming.resultsTimer ?? current.resultsTimer,
     aiEnabled: incoming.aiEnabled ?? current.aiEnabled,
     aiMonthlyLimit: incoming.aiMonthlyLimit ?? current.aiMonthlyLimit,
-    aiUsage: current.aiUsage
+    whatsappNumber: incoming.whatsappNumber ?? current.whatsappNumber,
+    aiUsage: current.aiUsage,
+    botGlobalHints: current.botGlobalHints
   });
   saveSettings(settings);
   // حدّث إعدادات الغرف النشطة أيضاً حتى لا تنتظر بدء مباراة جديدة
@@ -1577,6 +1647,15 @@ app.post('/api/settings', requireAdmin, (req, res) => {
   });
   res.json({ ok: true, settings: { ...settings, aiReady: aiReady(), hasOpenAiKey: Boolean(OPENAI_API_KEY), aiModel: OPENAI_MODEL } });
 });
+
+app.get('/api/settings/ai-test', requireAdmin, async (req, res) => {
+  const settings = readSettings();
+  if (!settings.aiEnabled) return res.json({ ok: false, message: 'AI متوقف من لوحة التحكم' });
+  if (!OPENAI_API_KEY) return res.json({ ok: false, message: 'مفتاح OPENAI_API_KEY غير موجود في Render' });
+  if (settings.aiMonthlyLimit && settings.aiUsage.requests >= settings.aiMonthlyLimit) return res.json({ ok: false, message: 'تم الوصول إلى حد الطلبات الشهري' });
+  res.json({ ok: true, message: 'إعدادات AI جاهزة للاستخدام' });
+});
+
 app.post('/api/settings/ai-usage/reset', requireAdmin, (req, res) => {
   const settings = readSettings();
   settings.aiUsage = { month: currentAiMonth(), requests: 0, successes: 0, failures: 0 };
