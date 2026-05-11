@@ -17,6 +17,7 @@
     <button class="adminTab" data-admin-tab="rooms">🏠 الغرف والصور</button>
     <button class="adminTab" data-admin-tab="gallery">🖼️ كل الصور</button>
     <button class="adminTab" data-admin-tab="players">👥 اللاعبين</button>
+    <button class="adminTab" data-admin-tab="messages">📩 الرسائل</button>
     <button class="adminTab" data-admin-tab="settings">⚙️ الإعدادات</button>
   </nav>
 
@@ -32,6 +33,7 @@
       <button class="adminStatCard" data-admin-tab-jump="rooms"><strong id="statRooms">—</strong><span>غرف</span></button>
       <button class="adminStatCard" data-admin-tab-jump="gallery"><strong id="statImages">—</strong><span>صورة عامة</span></button>
       <button class="adminStatCard" data-admin-tab-jump="players"><strong id="statPlayers">—</strong><span>لاعب</span></button>
+      <button class="adminStatCard" data-admin-tab-jump="messages"><strong id="statMessages">—</strong><span>رسائل جديدة</span></button>
       <button class="adminStatCard" data-admin-tab-jump="settings"><strong id="statAi">—</strong><span>حالة AI</span></button>
     </div>
     <div class="adminQuickGrid">
@@ -110,6 +112,26 @@
     <div id="playersAdminList" class="playersAdminList"></div>
   </section>
 
+
+  <section class="panel adminSection" data-admin-section="messages">
+    <div class="adminSectionHead">
+      <div>
+        <h2>📩 رسائل تواصل معنا</h2>
+        <p class="muted">استقبل اقتراحات اللاعبين ومشاكلهم من صفحة تواصل معنا.</p>
+      </div>
+      <button id="messagesReloadBtn" class="smallBtn">تحديث الرسائل</button>
+    </div>
+    <div class="playersToolbar stickyToolbar">
+      <select id="messagesFilter">
+        <option value="">كل الرسائل</option>
+        <option value="new">الجديدة فقط</option>
+        <option value="read">المقروءة فقط</option>
+      </select>
+      <button id="messagesFilterBtn" class="smallBtn">تطبيق</button>
+    </div>
+    <div id="contactMessagesList" class="playersAdminList"></div>
+  </section>
+
   <section class="panel adminSection" data-admin-section="settings">
     <div class="adminSectionHead">
       <div>
@@ -147,7 +169,16 @@
           <p><strong>نجحت:</strong> <span id="aiUsageSuccesses">0</span> — <strong>فشلت:</strong> <span id="aiUsageFailures">0</span></p>
           <p class="muted">هذا عداد استخدام داخلي تقريبي، وليس فاتورة OpenAI الرسمية.</p>
         </div>
+        <button id="saveAiSettings" class="smallBtn">حفظ إعدادات AI</button>
+        <button id="testAiConnection" class="smallBtn">اختبار AI</button>
         <button id="resetAiUsage" class="smallBtn">تصفير عداد AI</button>
+      </div>
+      <div class="adminCard">
+        <h2>📞 التواصل</h2>
+        <label>رقم واتساب اختياري للاعبين</label>
+        <input id="whatsappNumber" placeholder="مثال: 965XXXXXXXX">
+        <p class="muted">إذا تركته فارغًا سيبقى نموذج التواصل فقط.</p>
+        <button id="saveContactSettings" class="smallBtn">حفظ إعدادات التواصل</button>
       </div>
     </div>
   </section>

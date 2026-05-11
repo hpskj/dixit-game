@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#6c4df6">
+  <title>تواصل معنا - Dixit Q8</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="hero smallHero">
+  <div><h1>📩 تواصل معنا</h1><p>أرسل ملاحظتك أو بلاغك لإدارة اللعبة.</p></div>
+  <div class="rowActions"><a class="adminLink" href="/">العودة للعبة</a></div>
+</header>
+<main>
+  <section class="panel authBox contactBox">
+    <h2>أرسل رسالة</h2>
+    <input id="contactName" placeholder="اسمك">
+    <input id="contactEmail" type="email" placeholder="الإيميل">
+    <textarea id="contactMessage" rows="7" placeholder="اكتب رسالتك هنا"></textarea>
+    <button id="sendContactBtn">إرسال</button>
+    <a id="whatsappContactBtn" class="adminLink hidden" target="_blank" rel="noopener">تواصل عبر واتساب</a>
+    <p id="contactStatus" class="muted"></p>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="/contact.js"></script>
+<script src="/pwa.js"></script>
+</body>
+</html>

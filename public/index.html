@@ -3,6 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#6c4df6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="DixitQ8">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <title>🎨 لعبة خيال أونلاين</title>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -13,7 +18,9 @@
     <p id="welcomeText">سجّل دخولك ثم اختر غرفة اللعب المناسبة.</p>
   </div>
   <div class="topActions">
+    <button id="installAppBtn" class="smallBtn hidden" type="button" onclick="installDixitApp()">📲 تثبيت التطبيق</button>
     <div id="timerText" class="timerText"></div>
+    <a href="/contact.html" class="adminLink">تواصل معنا</a>
     <a href="/" class="adminLink">اللعبة</a>
     <a href="/profile.html" class="adminLink">بروفايلي</a>
     <a href="/leaderboard.html" class="adminLink">الترتيب</a>
@@ -62,5 +69,6 @@
 <script src="/socket.io/socket.io.js"></script>
 <script src="/app.js"></script>
 <script src="/smart-features.js"></script>
+<script src="/pwa.js"></script>
 </body>
 </html>

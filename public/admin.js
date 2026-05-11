@@ -35,6 +35,7 @@ async function loadSettings(){
   if($('resultsTimer')) $('resultsTimer').value=s.resultsTimer ?? 45;
   if($('aiEnabled')) $('aiEnabled').checked=!!s.aiEnabled;
   if($('aiMonthlyLimit')) $('aiMonthlyLimit').value=s.aiMonthlyLimit ?? 0;
+  if($('whatsappNumber')) $('whatsappNumber').value=s.whatsappNumber || '';
   const usage=s.aiUsage || {};
   setText('aiStatus', s.aiEnabled ? (s.hasOpenAiKey ? 'مفعّل' : 'مفعّل لكن مفتاح OPENAI_API_KEY غير موجود') : 'متوقف');
   setText('aiUsageMonth', usage.month || '—');
@@ -376,3 +377,86 @@ if($('playersSearchBtn')) $('playersSearchBtn').onclick = loadPlayers;
 if($('playersReloadBtn')) $('playersReloadBtn').onclick = loadPlayers;
 if($('playersSearch')) $('playersSearch').addEventListener('keydown', e => { if(e.key === 'Enter') loadPlayers(); });
 loadPlayers();
+
+// ===== رسائل تواصل معنا =====
+function fmtDate(value){ try { return new Date(value).toLocaleString('ar-KW'); } catch { return value || '—'; } }
+async function loadContactMessages(){
+  const box = $('contactMessagesList');
+  if(!box) return;
+  box.innerHTML = '<p class="muted">جاري تحميل الرسائل...</p>';
+  const status = $('messagesFilter')?.value || '';
+  const data = await fetch('/api/admin/contact-messages' + (status ? '?status=' + encodeURIComponent(status) : '')).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  if(!data.ok){ box.innerHTML = `<p class="errorText">${escHtml(data.message || 'فشل تحميل الرسائل')}</p>`; return; }
+  const messages = data.messages || [];
+  updateAdminStat('statMessages', messages.filter(m => m.status === 'new').length);
+  if(!messages.length){ box.innerHTML = '<p class="muted">لا توجد رسائل.</p>'; return; }
+  box.innerHTML = messages.map(m => `
+    <div class="playerAdminCard ${m.status === 'new' ? 'unreadMessage' : ''}">
+      <div class="playerAdminHead">
+        <div><strong>${escHtml(m.name || 'لاعب')}</strong><span>${escHtml(m.email || '')}</span></div>
+        <span class="pill">${m.status === 'new' ? 'جديدة' : 'مقروءة'}</span>
+      </div>
+      <p class="messageBody">${escHtml(m.message || '')}</p>
+      <p class="muted">${fmtDate(m.created_at)}</p>
+      <div class="rowActions">
+        <button class="smallBtn" onclick="markContactMessageRead('${m.id}')">تحديد كمقروءة</button>
+        <button class="danger smallBtn" onclick="deleteContactMessage('${m.id}')">حذف</button>
+      </div>
+    </div>
+  `).join('');
+}
+async function markContactMessageRead(id){
+  const res = await fetch('/api/admin/contact-messages/' + encodeURIComponent(id) + '/read', { method:'POST' }).then(r=>r.json()).catch(()=>({ok:false}));
+  if(!res.ok) return toast('فشل تحديث الرسالة');
+  await loadContactMessages();
+}
+async function deleteContactMessage(id){
+  if(!confirm('حذف هذه الرسالة؟')) return;
+  const res = await fetch('/api/admin/contact-messages/' + encodeURIComponent(id), { method:'DELETE' }).then(r=>r.json()).catch(()=>({ok:false}));
+  if(!res.ok) return toast('فشل حذف الرسالة');
+  await loadContactMessages();
+}
+window.loadContactMessages = loadContactMessages;
+window.markContactMessageRead = markContactMessageRead;
+window.deleteContactMessage = deleteContactMessage;
+if($('messagesReloadBtn')) $('messagesReloadBtn').onclick = loadContactMessages;
+if($('messagesFilterBtn')) $('messagesFilterBtn').onclick = loadContactMessages;
+
+// أزرار إضافية لإعدادات AI والتواصل
+async function saveAllSettings(extraToast){
+  const body={
+    storyTimer:numVal('storyTimer',45),
+    submitTimer:numVal('submitTimer',45),
+    voteTimer:numVal('voteTimer',45),
+    resultsTimer:numVal('resultsTimer',45),
+    aiEnabled:!!$('aiEnabled')?.checked,
+    aiMonthlyLimit:numVal('aiMonthlyLimit',0),
+    whatsappNumber:$('whatsappNumber')?.value?.trim() || ''
+  };
+  const res=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  if(!res.ok) return toast(res.message || 'فشل حفظ الإعدادات');
+  toast(extraToast || 'تم حفظ الإعدادات');
+  await loadSettings();
+}
+if($('saveAiSettings')) $('saveAiSettings').onclick=()=>saveAllSettings('تم حفظ إعدادات AI');
+if($('saveContactSettings')) $('saveContactSettings').onclick=()=>saveAllSettings('تم حفظ إعدادات التواصل');
+if($('testAiConnection')) $('testAiConnection').onclick=async()=>{
+  await saveAllSettings('تم حفظ إعدادات AI');
+  const res=await fetch('/api/settings/ai-test').then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  toast(res.message || (res.ok ? 'AI جاهز' : 'AI غير جاهز'));
+};
+
+// تحميل الرسائل عند فتح تبويبها
+const _oldShowAdminSection = window.showAdminSection;
+if (typeof showAdminSection === 'function') {
+  const originalShow = showAdminSection;
+  window.showAdminSection = function(name){
+    originalShow(name);
+    if(name === 'messages') loadContactMessages();
+  };
+}
+document.querySelectorAll('[data-admin-tab="messages"],[data-admin-tab-jump="messages"]').forEach(el => {
+  el.addEventListener('click', () => setTimeout(loadContactMessages, 150));
+});
+// حمّل عدد الرسائل الجديدة للملخص بدون فتح التبويب
+loadContactMessages().catch(()=>{});
