@@ -134,3 +134,28 @@ input,button{font-family:inherit;border:0;border-radius:14px;padding:12px 14px;f
 .errorText{color:#ffb4b4}
 .playerCreateCard{margin-bottom:12px}
 @media(max-width:700px){.playerHead{display:block}.playerActions input{max-width:none;width:100%}}
+
+/* ===== Organized Admin Panel ===== */
+.adminShell{display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px;align-items:start}
+.adminTabs{position:sticky;top:14px;display:grid;gap:10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:22px;padding:12px;backdrop-filter:blur(14px);box-shadow:0 16px 50px rgba(0,0,0,.18);z-index:5}
+.adminTab{width:100%;text-align:right;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:14px;color:#fff;padding:12px 14px;font-weight:900;cursor:pointer}
+.adminTab:hover{transform:none;background:rgba(255,255,255,.14)}
+.adminTab.active{background:linear-gradient(135deg,#7c5cff,#23d5ab);box-shadow:0 10px 28px rgba(0,0,0,.22)}
+.adminSection{display:none;min-width:0}
+.adminSection.active{display:block}
+.adminSectionHead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px}
+.adminSectionHead h2{margin-top:0;margin-bottom:6px}
+.adminStatsGrid{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:12px;margin:18px 0}
+.adminStatCard{display:grid;gap:5px;text-align:center;border-radius:18px;padding:18px 12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#fff;cursor:pointer}
+.adminStatCard strong{font-size:32px;line-height:1}.adminStatCard span{color:#d8dcff;font-weight:800}
+.adminQuickGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:16px}
+.adminFold{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:0;margin:12px 0 18px;overflow:hidden}
+.adminFold summary{cursor:pointer;font-weight:900;padding:14px 16px;background:rgba(255,255,255,.07)}
+.adminFold[open] summary{border-bottom:1px solid rgba(255,255,255,.12)}
+.flatCard{border:0;background:transparent;border-radius:0;box-shadow:none}
+.stickyToolbar{position:sticky;top:14px;z-index:4;background:rgba(24,20,55,.86);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:10px}
+.playerAdminCard{max-height:520px;overflow:auto}
+.adminRooms .adminRoomCard{max-height:720px;overflow:auto}
+.adminRooms .cardsGrid,.adminSection[data-admin-section="gallery"] .cardsGrid{max-height:72vh;overflow:auto;padding-left:6px;padding-right:6px}
+@media(max-width:900px){.adminShell{grid-template-columns:1fr}.adminTabs{position:sticky;top:0;display:flex;overflow:auto;border-radius:0;margin:-20px -4vw 16px;padding:10px 4vw}.adminTab{white-space:nowrap;text-align:center}.adminStatsGrid{grid-template-columns:repeat(2,1fr)}.adminSectionHead{display:block}.stickyToolbar{top:68px}}
+@media(max-width:520px){.adminStatsGrid{grid-template-columns:1fr}.adminQuickGrid{grid-template-columns:1fr}}

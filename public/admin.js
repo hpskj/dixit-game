@@ -3,6 +3,30 @@ const $ = id => document.getElementById(id);
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',2500); }
 function setText(id, value){ const el=$(id); if(el) el.textContent=value; }
 function numVal(id, fallback){ const el=$(id); const n=Number(el?.value); return Number.isFinite(n) ? n : fallback; }
+
+function showAdminSection(name){
+  document.querySelectorAll('.adminTab').forEach(btn => btn.classList.toggle('active', btn.dataset.adminTab === name));
+  document.querySelectorAll('.adminSection').forEach(sec => sec.classList.toggle('active', sec.dataset.adminSection === name));
+  localStorage.setItem('adminActiveSection', name);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function bindAdminTabs(){
+  document.querySelectorAll('[data-admin-tab]').forEach(btn => {
+    btn.addEventListener('click', () => showAdminSection(btn.dataset.adminTab));
+  });
+  document.addEventListener('click', (event) => {
+    const jump = event.target.closest('[data-admin-tab-jump]');
+    if (jump) showAdminSection(jump.dataset.adminTabJump);
+  });
+  const saved = localStorage.getItem('adminActiveSection') || 'dashboard';
+  showAdminSection(saved);
+}
+function updateAdminStat(id, value){ const el=$(id); if(el) el.textContent=value; }
+async function refreshAdminDashboard(){
+  await Promise.allSettled([loadSettings(), loadRooms(), loadCards(), loadPlayers()]);
+  toast('تم تحديث الملخص');
+}
+window.refreshAdminDashboard = refreshAdminDashboard;
 async function loadSettings(){
   const s=await fetch('/api/settings').then(r=>r.json());
   if($('storyTimer')) $('storyTimer').value=s.storyTimer ?? s.selectTimer ?? 45;
@@ -17,6 +41,7 @@ async function loadSettings(){
   setText('aiUsageRequests', usage.requests || 0);
   setText('aiUsageSuccesses', usage.successes || 0);
   setText('aiUsageFailures', usage.failures || 0);
+  updateAdminStat('statAi', s.aiEnabled ? 'ON' : 'OFF');
 }
 $('saveSettings').onclick=async()=>{
   const body={
@@ -42,6 +67,7 @@ if($('resetAiUsage')) $('resetAiUsage').onclick=async()=>{
 
 async function loadCards(){
   const cards=await fetch('/api/cards').then(r=>r.json());
+  updateAdminStat('statImages', Array.isArray(cards) ? cards.length : 0);
   $('cardsList').innerHTML = `
     <div class="globalBulkActions">
       <button class="smallBtn" onclick="selectAllGlobalCards(true)">تحديد الكل</button>
@@ -66,6 +92,7 @@ async function loadCards(){
 async function loadRooms(){
   const data = await fetch('/api/admin/room-templates').then(r=>r.json());
   const rooms = data.rooms || [];
+  updateAdminStat('statRooms', rooms.length);
   $('roomsAdminList').innerHTML = rooms.length ? rooms.map(room => {
     const cards = room.cards || [];
     const coverImage = room.coverImage || room.cover_image || '';
@@ -248,6 +275,7 @@ window.deleteRoom = async (roomId) => {
 
 window.delCard=async(id)=>{ if(!confirm('حذف هذه الصورة نهائياً من النظام؟')) return; await fetch('/api/cards/'+id,{method:'DELETE'}); await loadCards(); await loadRooms(); };
 
+bindAdminTabs();
 loadSettings(); loadRooms(); loadCards();
 $('logoutBtn').onclick = async () => { await fetch('/api/admin/logout', {method:'POST'}); location.href='/admin-login.html'; };
 
@@ -263,6 +291,7 @@ async function loadPlayers(){
   const data = await fetch('/api/admin/members?q=' + encodeURIComponent(q)).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
   if(!data.ok){ box.innerHTML = `<p class="errorText">${escHtml(data.message || 'فشل تحميل اللاعبين')}</p>`; return; }
   const members = data.members || [];
+  updateAdminStat('statPlayers', members.length);
   if(!members.length){ box.innerHTML = '<p class="muted">لا يوجد لاعبون.</p>'; return; }
   box.innerHTML = members.map(m => `
     <article class="playerAdminCard" data-id="${escHtml(m.id)}">

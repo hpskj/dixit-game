@@ -11,79 +11,145 @@
   <div><h1>🛠️ لوحة التحكم</h1><p>إدارة غرف اللعب وفئات الصور.</p></div>
   <div class="rowActions"><button id="logoutBtn" class="danger">تسجيل الخروج</button><a class="adminLink" href="index.html">العودة للموقع</a></div>
 </header>
-<main>
-<section class="panel adminGrid">
-  <div class="adminCard">
-    <h2>➕ إنشاء غرفة / فئة صور</h2>
-    <input id="roomName" placeholder="اسم الغرفة مثل: أحلام، رعب، أطفال">
-    <input id="roomCategory" placeholder="فئة الصور مثل: خيال، طبيعة، غموض">
-    <input id="roomDescription" placeholder="وصف اختياري يظهر للاعبين">
-    <button id="addRoom">إنشاء الغرفة</button>
-    <p class="muted">بعد إنشاء الغرفة ارفع الصور الخاصة بها من بطاقتها بالأسفل.</p>
-  </div>
-  <div class="adminCard">
-    <h2>⏱️ مؤقتات اللعبة</h2>
-    <label>وقت الراوي لاختيار الكرت وكتابة التلميح</label>
-    <input id="storyTimer" type="number" min="5" max="300" value="45">
-    <label>وقت اللاعبين لاختيار الكروت</label>
-    <input id="submitTimer" type="number" min="5" max="300" value="45">
-    <label>وقت التصويت</label>
-    <input id="voteTimer" type="number" min="5" max="300" value="45">
-    <label>وقت عرض النتائج قبل الجولة التالية</label>
-    <input id="resultsTimer" type="number" min="0" max="300" value="45">
-    <button id="saveSettings">حفظ الإعدادات</button>
-    <p class="muted">القيمة 0 في وقت النتائج تعني عدم الانتقال التلقائي.</p>
-  </div>
+<main class="adminShell">
+  <nav class="adminTabs" aria-label="أقسام لوحة التحكم">
+    <button class="adminTab active" data-admin-tab="dashboard">🏠 الرئيسية</button>
+    <button class="adminTab" data-admin-tab="rooms">🏠 الغرف والصور</button>
+    <button class="adminTab" data-admin-tab="gallery">🖼️ كل الصور</button>
+    <button class="adminTab" data-admin-tab="players">👥 اللاعبين</button>
+    <button class="adminTab" data-admin-tab="settings">⚙️ الإعدادات</button>
+  </nav>
 
-  <div class="adminCard">
-    <h2>🤖 إعدادات AI</h2>
-    <label class="switchLine">
-      <input id="aiEnabled" type="checkbox">
-      <span>تفعيل البوت الذكي AI</span>
-    </label>
-    <label>حد طلبات AI الشهري (0 = بدون حد)</label>
-    <input id="aiMonthlyLimit" type="number" min="0" max="1000000" value="0">
-    <div class="aiUsageBox">
-      <p><strong>حالة AI:</strong> <span id="aiStatus">—</span></p>
-      <p><strong>الشهر:</strong> <span id="aiUsageMonth">—</span></p>
-      <p><strong>عدد الطلبات:</strong> <span id="aiUsageRequests">0</span></p>
-      <p><strong>نجحت:</strong> <span id="aiUsageSuccesses">0</span> — <strong>فشلت:</strong> <span id="aiUsageFailures">0</span></p>
-      <p class="muted">هذا عداد استخدام داخلي تقريبي، وليس فاتورة OpenAI الرسمية.</p>
+  <section class="panel adminSection active" data-admin-section="dashboard">
+    <div class="adminSectionHead">
+      <div>
+        <h2>📊 نظرة سريعة</h2>
+        <p class="muted">اختصرنا لوحة التحكم في تبويبات حتى لا تصبح الصفحة طويلة عند كثرة الصور واللاعبين.</p>
+      </div>
+      <button class="smallBtn" onclick="refreshAdminDashboard()">تحديث الملخص</button>
     </div>
-    <button id="resetAiUsage" class="smallBtn">تصفير عداد AI</button>
-  </div>
-</section>
-
-
-<section class="panel">
-  <h2>👥 إدارة اللاعبين</h2>
-  <div class="adminCard playerCreateCard">
-    <h3>➕ إضافة لاعب من الأدمن</h3>
-    <div class="playersFormGrid">
-      <input id="newPlayerDisplay" placeholder="اسم العرض">
-      <input id="newPlayerUsername" placeholder="اليوزر username">
-      <input id="newPlayerEmail" type="email" placeholder="الإيميل">
-      <input id="newPlayerPassword" type="password" placeholder="الباسوورد">
-      <button id="createPlayerBtn">إضافة اللاعب</button>
+    <div class="adminStatsGrid">
+      <button class="adminStatCard" data-admin-tab-jump="rooms"><strong id="statRooms">—</strong><span>غرف</span></button>
+      <button class="adminStatCard" data-admin-tab-jump="gallery"><strong id="statImages">—</strong><span>صورة عامة</span></button>
+      <button class="adminStatCard" data-admin-tab-jump="players"><strong id="statPlayers">—</strong><span>لاعب</span></button>
+      <button class="adminStatCard" data-admin-tab-jump="settings"><strong id="statAi">—</strong><span>حالة AI</span></button>
     </div>
-  </div>
-  <div class="playersToolbar">
-    <input id="playersSearch" placeholder="بحث باليوزر أو الاسم أو الإيميل">
-    <button id="playersSearchBtn" class="smallBtn">بحث</button>
-    <button id="playersReloadBtn" class="smallBtn">تحديث</button>
-  </div>
-  <div id="playersAdminList" class="playersAdminList"></div>
-</section>
+    <div class="adminQuickGrid">
+      <article class="adminCard">
+        <h3>➕ إنشاء غرفة سريعة</h3>
+        <p class="muted">افتح قسم الغرف لإنشاء غرفة ورفع الصور الخاصة بها.</p>
+        <button class="smallBtn" data-admin-tab-jump="rooms">فتح الغرف</button>
+      </article>
+      <article class="adminCard">
+        <h3>👥 إدارة اللاعبين</h3>
+        <p class="muted">بحث، تعديل، إيقاف أو حذف اللاعبين من قسم مستقل.</p>
+        <button class="smallBtn" data-admin-tab-jump="players">فتح اللاعبين</button>
+      </article>
+      <article class="adminCard">
+        <h3>⚙️ الإعدادات</h3>
+        <p class="muted">تحكم بالمؤقتات والبوت الذكي AI من مكان واحد.</p>
+        <button class="smallBtn" data-admin-tab-jump="settings">فتح الإعدادات</button>
+      </article>
+    </div>
+  </section>
 
-<section class="panel">
-  <h2>الغرف الحالية</h2>
-  <div id="roomsAdminList" class="adminRooms"></div>
-</section>
+  <section class="panel adminSection" data-admin-section="rooms">
+    <div class="adminSectionHead">
+      <div>
+        <h2>🏠 الغرف والصور</h2>
+        <p class="muted">أنشئ الغرف، ارفع صورها، عيّن الغلاف، واحذف الصور المحددة.</p>
+      </div>
+    </div>
+    <details class="adminFold" open>
+      <summary>➕ إنشاء غرفة / فئة صور</summary>
+      <div class="adminCard flatCard">
+        <input id="roomName" placeholder="اسم الغرفة مثل: أحلام، رعب، أطفال">
+        <input id="roomCategory" placeholder="فئة الصور مثل: خيال، طبيعة، غموض">
+        <input id="roomDescription" placeholder="وصف اختياري يظهر للاعبين">
+        <button id="addRoom">إنشاء الغرفة</button>
+        <p class="muted">بعد إنشاء الغرفة ارفع الصور الخاصة بها من بطاقتها بالأسفل.</p>
+      </div>
+    </details>
+    <div id="roomsAdminList" class="adminRooms"></div>
+  </section>
 
-<section class="panel">
-  <h2>كل الصور العامة</h2>
-  <p class="muted">هذه قائمة كل الصور المرفوعة في النظام. صور الغرف تُدار من بطاقات الغرف أعلاه.</p>
-  <div id="cardsList" class="cardsGrid"></div>
-</section>
+  <section class="panel adminSection" data-admin-section="gallery">
+    <div class="adminSectionHead">
+      <div>
+        <h2>🖼️ كل الصور العامة</h2>
+        <p class="muted">هذه قائمة كل الصور المرفوعة في النظام. صور الغرف تُدار من بطاقات الغرف.</p>
+      </div>
+    </div>
+    <div id="cardsList" class="cardsGrid"></div>
+  </section>
+
+  <section class="panel adminSection" data-admin-section="players">
+    <div class="adminSectionHead">
+      <div>
+        <h2>👥 إدارة اللاعبين</h2>
+        <p class="muted">إضافة، بحث، تعديل، إيقاف، تغيير كلمة مرور، أو حذف لاعب.</p>
+      </div>
+    </div>
+    <details class="adminFold">
+      <summary>➕ إضافة لاعب من الأدمن</summary>
+      <div class="adminCard flatCard playerCreateCard">
+        <div class="playersFormGrid">
+          <input id="newPlayerDisplay" placeholder="اسم العرض">
+          <input id="newPlayerUsername" placeholder="اليوزر username">
+          <input id="newPlayerEmail" type="email" placeholder="الإيميل">
+          <input id="newPlayerPassword" type="password" placeholder="الباسوورد">
+          <button id="createPlayerBtn">إضافة اللاعب</button>
+        </div>
+      </div>
+    </details>
+    <div class="playersToolbar stickyToolbar">
+      <input id="playersSearch" placeholder="بحث باليوزر أو الاسم أو الإيميل">
+      <button id="playersSearchBtn" class="smallBtn">بحث</button>
+      <button id="playersReloadBtn" class="smallBtn">تحديث</button>
+    </div>
+    <div id="playersAdminList" class="playersAdminList"></div>
+  </section>
+
+  <section class="panel adminSection" data-admin-section="settings">
+    <div class="adminSectionHead">
+      <div>
+        <h2>⚙️ الإعدادات</h2>
+        <p class="muted">إعدادات المؤقتات و AI في بطاقات منفصلة.</p>
+      </div>
+    </div>
+    <div class="adminGrid">
+      <div class="adminCard">
+        <h2>⏱️ مؤقتات اللعبة</h2>
+        <label>وقت الراوي لاختيار الكرت وكتابة التلميح</label>
+        <input id="storyTimer" type="number" min="5" max="300" value="45">
+        <label>وقت اللاعبين لاختيار الكروت</label>
+        <input id="submitTimer" type="number" min="5" max="300" value="45">
+        <label>وقت التصويت</label>
+        <input id="voteTimer" type="number" min="5" max="300" value="45">
+        <label>وقت عرض النتائج قبل الجولة التالية</label>
+        <input id="resultsTimer" type="number" min="0" max="300" value="45">
+        <button id="saveSettings">حفظ الإعدادات</button>
+        <p class="muted">القيمة 0 في وقت النتائج تعني عدم الانتقال التلقائي.</p>
+      </div>
+
+      <div class="adminCard">
+        <h2>🤖 إعدادات AI</h2>
+        <label class="switchLine">
+          <input id="aiEnabled" type="checkbox">
+          <span>تفعيل البوت الذكي AI</span>
+        </label>
+        <label>حد طلبات AI الشهري (0 = بدون حد)</label>
+        <input id="aiMonthlyLimit" type="number" min="0" max="1000000" value="0">
+        <div class="aiUsageBox">
+          <p><strong>حالة AI:</strong> <span id="aiStatus">—</span></p>
+          <p><strong>الشهر:</strong> <span id="aiUsageMonth">—</span></p>
+          <p><strong>عدد الطلبات:</strong> <span id="aiUsageRequests">0</span></p>
+          <p><strong>نجحت:</strong> <span id="aiUsageSuccesses">0</span> — <strong>فشلت:</strong> <span id="aiUsageFailures">0</span></p>
+          <p class="muted">هذا عداد استخدام داخلي تقريبي، وليس فاتورة OpenAI الرسمية.</p>
+        </div>
+        <button id="resetAiUsage" class="smallBtn">تصفير عداد AI</button>
+      </div>
+    </div>
+  </section>
 </main>
 <div id="toast"></div><script src="admin.js"></script></body></html>
