@@ -250,3 +250,100 @@ window.delCard=async(id)=>{ if(!confirm('حذف هذه الصورة نهائيا
 
 loadSettings(); loadRooms(); loadCards();
 $('logoutBtn').onclick = async () => { await fetch('/api/admin/logout', {method:'POST'}); location.href='/admin-login.html'; };
+
+// ================= إدارة اللاعبين =================
+function escHtml(value){
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+async function loadPlayers(){
+  const box = $('playersAdminList');
+  if (!box) return;
+  const q = $('playersSearch')?.value?.trim() || '';
+  box.innerHTML = '<p class="muted">جاري تحميل اللاعبين...</p>';
+  const data = await fetch('/api/admin/members?q=' + encodeURIComponent(q)).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  if(!data.ok){ box.innerHTML = `<p class="errorText">${escHtml(data.message || 'فشل تحميل اللاعبين')}</p>`; return; }
+  const members = data.members || [];
+  if(!members.length){ box.innerHTML = '<p class="muted">لا يوجد لاعبون.</p>'; return; }
+  box.innerHTML = members.map(m => `
+    <article class="playerAdminCard" data-id="${escHtml(m.id)}">
+      <div class="playerHead">
+        <div>
+          <h3>${escHtml(m.display_name || m.username)} ${m.status === 'banned' ? '<span class="banBadge">موقوف</span>' : ''}</h3>
+          <p class="muted">@${escHtml(m.username)} — ${escHtml(m.email || 'بدون إيميل')}</p>
+          <p class="muted">تاريخ التسجيل: ${m.created_at ? new Date(m.created_at).toLocaleString('ar') : '—'}</p>
+        </div>
+        <button class="danger smallBtn" onclick="deletePlayer('${escHtml(m.id)}')">حذف اللاعب</button>
+      </div>
+      <div class="playersFormGrid editGrid">
+        <label>اسم العرض<input id="display_${escHtml(m.id)}" value="${escHtml(m.display_name || '')}"></label>
+        <label>اليوزر<input id="username_${escHtml(m.id)}" value="${escHtml(m.username || '')}"></label>
+        <label>الإيميل<input id="email_${escHtml(m.id)}" type="email" value="${escHtml(m.email || '')}"></label>
+        <label>رابط الصورة<input id="avatar_${escHtml(m.id)}" value="${escHtml(m.avatar_url || '')}"></label>
+        <label>النقاط<input id="score_${escHtml(m.id)}" type="number" min="0" value="${Number(m.score || 0)}"></label>
+        <label>الفوز<input id="wins_${escHtml(m.id)}" type="number" min="0" value="${Number(m.wins || 0)}"></label>
+        <label>المباريات<input id="games_${escHtml(m.id)}" type="number" min="0" value="${Number(m.games_played || 0)}"></label>
+        <label>الحالة<select id="status_${escHtml(m.id)}"><option value="active" ${m.status !== 'banned' ? 'selected' : ''}>نشط</option><option value="banned" ${m.status === 'banned' ? 'selected' : ''}>موقوف</option></select></label>
+      </div>
+      <div class="rowActions playerActions">
+        <button class="smallBtn" onclick="savePlayer('${escHtml(m.id)}')">حفظ بيانات اللاعب</button>
+        <input id="pass_${escHtml(m.id)}" type="password" placeholder="باسوورد جديد">
+        <button class="smallBtn" onclick="resetPlayerPassword('${escHtml(m.id)}')">تغيير الباسوورد</button>
+      </div>
+    </article>
+  `).join('');
+}
+
+window.savePlayer = async (id) => {
+  const body = {
+    display_name: $(`display_${id}`).value.trim(),
+    username: $(`username_${id}`).value.trim(),
+    email: $(`email_${id}`).value.trim(),
+    avatar_url: $(`avatar_${id}`).value.trim(),
+    score: Number($(`score_${id}`).value || 0),
+    wins: Number($(`wins_${id}`).value || 0),
+    games_played: Number($(`games_${id}`).value || 0),
+    status: $(`status_${id}`).value
+  };
+  const res = await fetch('/api/admin/members/' + encodeURIComponent(id), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  if(!res.ok) return toast(res.message || 'فشل حفظ بيانات اللاعب');
+  toast('تم حفظ بيانات اللاعب');
+  await loadPlayers();
+};
+
+window.resetPlayerPassword = async (id) => {
+  const password = $(`pass_${id}`).value;
+  if(!password || password.length < 6) return toast('اكتب باسوورد جديد 6 أحرف على الأقل');
+  if(!confirm('تغيير باسوورد هذا اللاعب؟')) return;
+  const res = await fetch('/api/admin/members/' + encodeURIComponent(id) + '/password', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password}) }).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  if(!res.ok) return toast(res.message || 'فشل تغيير الباسوورد');
+  toast('تم تغيير الباسوورد');
+  $(`pass_${id}`).value = '';
+};
+
+window.deletePlayer = async (id) => {
+  if(!confirm('حذف اللاعب نهائياً؟ هذا الإجراء لا يمكن التراجع عنه.')) return;
+  const res = await fetch('/api/admin/members/' + encodeURIComponent(id), { method:'DELETE' }).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  if(!res.ok) return toast(res.message || 'فشل حذف اللاعب');
+  toast('تم حذف اللاعب');
+  await loadPlayers();
+};
+
+async function createPlayerFromAdmin(){
+  const body = {
+    display_name: $('newPlayerDisplay').value.trim(),
+    username: $('newPlayerUsername').value.trim(),
+    email: $('newPlayerEmail').value.trim(),
+    password: $('newPlayerPassword').value
+  };
+  const res = await fetch('/api/admin/members', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }).then(r=>r.json()).catch(()=>({ok:false,message:'فشل الاتصال'}));
+  if(!res.ok) return toast(res.message || 'فشل إضافة اللاعب');
+  ['newPlayerDisplay','newPlayerUsername','newPlayerEmail','newPlayerPassword'].forEach(id => { if($(id)) $(id).value=''; });
+  toast('تم إضافة اللاعب');
+  await loadPlayers();
+}
+
+if($('createPlayerBtn')) $('createPlayerBtn').onclick = createPlayerFromAdmin;
+if($('playersSearchBtn')) $('playersSearchBtn').onclick = loadPlayers;
+if($('playersReloadBtn')) $('playersReloadBtn').onclick = loadPlayers;
+if($('playersSearch')) $('playersSearch').addEventListener('keydown', e => { if(e.key === 'Enter') loadPlayers(); });
+loadPlayers();

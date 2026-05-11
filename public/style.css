@@ -118,3 +118,19 @@ input,button{font-family:inherit;border:0;border-radius:14px;padding:12px 14px;f
 .switchLine input{width:auto;transform:scale(1.2)}
 .aiUsageBox{margin:12px 0;padding:12px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.06)}
 .aiUsageBox p{margin:6px 0}
+
+/* إدارة اللاعبين */
+.playersToolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+.playersToolbar input{min-width:260px;flex:1}
+.playersAdminList{display:grid;gap:14px}
+.playerAdminCard{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.15)}
+.playerHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}
+.playersFormGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end}
+.playersFormGrid label{font-size:.9rem;color:#ddd;display:grid;gap:6px}
+.playersFormGrid input,.playersFormGrid select{width:100%;box-sizing:border-box}
+.playerActions{margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.playerActions input{max-width:240px}
+.banBadge{display:inline-block;background:#b91c1c;color:#fff;border-radius:999px;padding:3px 8px;font-size:.75rem;margin-inline-start:6px}
+.errorText{color:#ffb4b4}
+.playerCreateCard{margin-bottom:12px}
+@media(max-width:700px){.playerHead{display:block}.playerActions input{max-width:none;width:100%}}
