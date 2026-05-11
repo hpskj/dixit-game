@@ -8,6 +8,10 @@ let myId = null;
 let timerInterval = null;
 let currentUser = null;
 let roomTemplates = [];
+let localSubmittedCardId = null;
+let localVotedTableId = null;
+let lastRenderPhase = null;
+let lastRenderCode = null;
 const LAST_ROOM_KEY = 'dixitq8_last_room_code';
 
 
@@ -170,7 +174,7 @@ function renderActions() {
     actions.innerHTML = `
       <div class="actionBox">
         <p>التلميح: <b>${state.hint || ''}</b></p>
-        ${myId === state.storytellerId ? '<p>انتظر اللاعبين يختارون كروتهم.</p>' : '<p>اختر كرتاً يناسب التلميح.</p>'}
+        ${myId === state.storytellerId ? '<p>انتظر اللاعبين يختارون كروتهم.</p>' : (localSubmittedCardId ? '<p>✔️ تم اختيار كرتك. انتظر باقي اللاعبين.</p>' : '<p>اختر كرتاً يناسب التلميح.</p>')}
       </div>
     `;
     return;
@@ -180,7 +184,7 @@ function renderActions() {
     actions.innerHTML = `
       <div class="actionBox">
         <p>التلميح: <b>${state.hint || ''}</b></p>
-        ${myId === state.storytellerId ? '<p>أنت الراوي، لا تصوّت.</p>' : '<p>صوّت للكرت الذي تعتقد أنه كرت الراوي.</p>'}
+        ${myId === state.storytellerId ? '<p>أنت الراوي، لا تصوّت.</p>' : (localVotedTableId ? '<p>✔️ تم تسجيل تصويتك. انتظر النتائج.</p>' : '<p>صوّت للكرت الذي تعتقد أنه كرت الراوي.</p>')}
       </div>
     `;
     return;
@@ -223,7 +227,11 @@ function renderHand() {
   }
 
   if (state.phase === 'submit' && myId !== state.storytellerId) {
-    hand.innerHTML = myHand.map(card => cardHtml(card, `submitPlayerCard('${card.id}')`)).join('');
+    if (localSubmittedCardId) {
+      hand.innerHTML = '<p class="muted">✔️ تم اختيار كرتك. لا يمكن تغييره بعد الإرسال.</p>';
+    } else {
+      hand.innerHTML = myHand.map(card => cardHtml(card, `submitPlayerCard('${card.id}')`)).join('');
+    }
     return;
   }
 
@@ -286,9 +294,10 @@ function renderTable() {
   }
 
   table.innerHTML = cards.map(card => {
-    const canVote = state.phase === 'voting' && myId !== state.storytellerId;
+    const canVote = state.phase === 'voting' && myId !== state.storytellerId && !localVotedTableId;
+    const selected = localVotedTableId === card.id ? ' selectedChoice' : '';
     return `
-      <button class="card tableCard" ${canVote ? `onclick="voteCard('${card.id}')"` : ''}>
+      <button class="card tableCard${selected}" ${canVote ? `onclick="voteCard('${card.id}')"` : ''}>
         <img src="${card.image}" alt="" loading="lazy">
       </button>
     `;
@@ -344,6 +353,13 @@ function startTimer() {
 function render() {
   if (!state) return;
 
+  if (lastRenderCode !== state.code || lastRenderPhase !== state.phase) {
+    if (state.phase !== 'submit') localSubmittedCardId = null;
+    if (state.phase !== 'voting') localVotedTableId = null;
+    lastRenderCode = state.code;
+    lastRenderPhase = state.phase;
+  }
+
   setHidden('roomsBox', true);
   setHidden('gameBox', false);
   const rt = $('roomTitle');
@@ -366,14 +382,18 @@ window.submitStoryCard = function(cardId) {
 };
 
 window.submitPlayerCard = function(cardId) {
-  if (!state) return;
+  if (!state || localSubmittedCardId) return;
+  localSubmittedCardId = cardId;
   selectSound();
+  render();
   socket.emit('submitCard', { code: state.code, cardId });
 };
 
 window.voteCard = function(tableId) {
-  if (!state) return;
+  if (!state || localVotedTableId) return;
+  localVotedTableId = tableId;
   selectSound();
+  render();
   socket.emit('vote', { code: state.code, tableId });
 };
 
@@ -534,8 +554,20 @@ socket.on('reconnectedToRoom', data => {
   toast(data?.message || 'تمت إعادة الاتصال');
 });
 
-socket.on('errorMessage', toast);
+socket.on('errorMessage', msg => {
+  if (String(msg || '').includes('لا يمكنك اختيار كرتك')) {
+    localVotedTableId = null;
+    render();
+  }
+  toast(msg);
+});
 socket.on('successMessage', toast);
+
+socket.on('choiceAccepted', data => {
+  if (data?.type === 'submit') localSubmittedCardId = data.cardId || localSubmittedCardId;
+  if (data?.type === 'vote') localVotedTableId = data.tableId || localVotedTableId;
+  render();
+});
 
 socket.on('kickedFromRoom', data => {
   toast(data?.message || 'تم طردك من الغرفة');

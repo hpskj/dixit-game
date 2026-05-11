@@ -159,3 +159,10 @@ input,button{font-family:inherit;border:0;border-radius:14px;padding:12px 14px;f
 .adminRooms .cardsGrid,.adminSection[data-admin-section="gallery"] .cardsGrid{max-height:72vh;overflow:auto;padding-left:6px;padding-right:6px}
 @media(max-width:900px){.adminShell{grid-template-columns:1fr}.adminTabs{position:sticky;top:0;display:flex;overflow:auto;border-radius:0;margin:-20px -4vw 16px;padding:10px 4vw}.adminTab{white-space:nowrap;text-align:center}.adminStatsGrid{grid-template-columns:repeat(2,1fr)}.adminSectionHead{display:block}.stickyToolbar{top:68px}}
 @media(max-width:520px){.adminStatsGrid{grid-template-columns:1fr}.adminQuickGrid{grid-template-columns:1fr}}
+
+/* Silent pick/vote feedback */
+.card.selectedChoice {
+  outline: 4px solid #22c55e;
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.18), 0 14px 32px rgba(0,0,0,0.20);
+}
