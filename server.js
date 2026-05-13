@@ -18,7 +18,25 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secret123';
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const ALLOWED_ORIGINS = [
+  'https://dixitq8.com',
+  'https://www.dixitq8.com',
+  'capacitor://localhost',
+  'http://localhost',
+  'https://localhost',
+  'http://localhost:3000',
+  'https://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://127.0.0.1:3000'
+];
+
+const io = new Server(server, {
+  cors: {
+    origin: ALLOWED_ORIGINS,
+    credentials: true,
+    methods: ['GET', 'POST']
+  }
+});
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data', 'cards.json');
 const SETTINGS_FILE = path.join(__dirname, 'data', 'settings.json');
@@ -37,6 +55,33 @@ if (CLOUDINARY_READY) {
 }
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || 'dixitq8/cards';
 const CLOUDINARY_AVATAR_FOLDER = process.env.CLOUDINARY_AVATAR_FOLDER || 'dixitq8/avatars';
+
+// ===== Android Capacitor / WebView CORS support =====
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (
+    origin &&
+    (
+      ALLOWED_ORIGINS.includes(origin) ||
+      /^https?:\/\/localhost(?::\d+)?$/.test(origin) ||
+      /^capacitor:\/\/localhost(?::\d+)?$/.test(origin)
+    )
+  ) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
 
 app.use(express.json());
 
@@ -69,11 +114,11 @@ app.get('/admin.js', (req, res) => {
 app.post('/api/admin/login', (req, res) => {
   const password = String(req.body.password || '');
   if (password !== ADMIN_PASSWORD) return res.status(401).json({ ok: false, message: 'كلمة المرور غير صحيحة' });
-  res.setHeader('Set-Cookie', `admin_token=${ADMIN_TOKEN}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+  res.setHeader('Set-Cookie', `admin_token=${ADMIN_TOKEN}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=604800`);
   res.json({ ok: true });
 });
 app.post('/api/admin/logout', (_, res) => {
-  res.setHeader('Set-Cookie', 'admin_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
+  res.setHeader('Set-Cookie', 'admin_token=; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=0');
   res.json({ ok: true });
 });
 app.get('/api/admin/check', (req, res) => res.json({ ok: isAdmin(req) }));
@@ -97,13 +142,15 @@ function getMemberFromRequest(req) {
 
 function getUserFromSocket(socket) {
   const cookie = socket.handshake.headers.cookie || '';
-  const token = cookie
+  let token = cookie
     .split(';')
     .map(v => v.trim())
     .find(v => v.startsWith('member_token='))
     ?.split('=')
     .slice(1)
     .join('=');
+
+  token = token || socket.handshake.auth?.token || socket.handshake.query?.token;
 
   if (!token) return null;
 
@@ -237,7 +284,7 @@ app.post('/api/auth/register', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.setHeader('Set-Cookie', `member_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+    res.setHeader('Set-Cookie', `member_token=${token}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=604800`);
     res.json({ ok: true, user: data, token });
   } catch (e) {
     console.error('Register error:', e);
@@ -281,7 +328,7 @@ app.post('/api/auth/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.setHeader('Set-Cookie', `member_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+    res.setHeader('Set-Cookie', `member_token=${token}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=604800`);
 
     res.json({
       ok: true,
@@ -306,7 +353,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.post('/api/auth/logout', (_, res) => {
-  res.setHeader('Set-Cookie', 'member_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
+  res.setHeader('Set-Cookie', 'member_token=; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=0');
   res.json({ ok: true });
 });
 
